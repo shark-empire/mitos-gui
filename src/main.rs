@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .expect("Failed to create Wayland listening socket");
 
 println!(
-    "MITOS GUI: Wayland socket created at {}",
+    "MITOS GUI: Wayland socket created at {:?}",
     listening_socket.socket_name()
 );
 
