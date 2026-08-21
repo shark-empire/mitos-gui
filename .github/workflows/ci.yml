@@ -19,6 +19,10 @@ jobs:
             pkg-config \
             libudev-dev \
             libseat-dev \
+            libinput-dev \
+            libpixman-1-dev \
+            libgbm-dev \
+            libdrm-dev\
             libwayland-dev \
             libxkbcommon-dev \
             libx11-dev \
