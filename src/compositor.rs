@@ -10,6 +10,8 @@ use smithay::{
 
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 
+use smithay::desktop::{PopupKind, Window};
+
 use smithay::wayland::{
     buffer::BufferHandler,
     compositor::{
@@ -28,6 +30,8 @@ use smithay::wayland::{
     shm::{ShmHandler, ShmState},
 };
 
+use crate::surface::{next_window_position, window_for_surface};
+
 use smithay::reexports::wayland_server::{
     backend::{ClientData, ClientId, DisconnectReason},
     protocol::{
@@ -40,8 +44,6 @@ use smithay::reexports::wayland_server::{
 use smithay::utils::Serial;
 
 use crate::state::MitosGuiState;
-
-use wayland_protocols::xdg::shell::server::xdg_toplevel;
 
 use smithay::reexports::wayland_server::protocol::wl_seat;
 
@@ -58,19 +60,38 @@ impl XdgShellHandler for MitosGuiState {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         println!("MITOS GUI: new application window");
 
-        surface.with_pending_state(|state| {
-            state.states.set(xdg_toplevel::State::Activated);
-        });
-
+        // The initial configure just tells the client its surface is
+        // ready to be mapped; actual size negotiation happens once it
+        // commits a buffer.
         surface.send_configure();
+
+        let window = Window::new(surface);
+        let position = next_window_position(&self.space);
+
+        // `activate: true` marks this window active and clears the
+        // Activated state from every other mapped window, so we don't
+        // need to touch xdg_toplevel state by hand here.
+        self.space.map_element(window, position, true);
+    }
+
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        println!("MITOS GUI: application window closed");
+
+        if let Some(window) = window_for_surface(&self.space, surface.wl_surface()) {
+            self.space.unmap_elem(&window);
+        }
     }
 
     fn new_popup(
         &mut self,
-        _surface: PopupSurface,
+        surface: PopupSurface,
         _positioner: PositionerState,
     ) {
         println!("MITOS GUI: new popup");
+
+        if let Err(err) = self.popups.track_popup(PopupKind::Xdg(surface)) {
+            tracing::warn!(?err, "MITOS GUI: failed to track popup");
+        }
     }
 
     fn grab(
@@ -138,6 +159,15 @@ impl CompositorHandler for MitosGuiState {
 
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
+
+        // Keep the window's tracked bounding box in sync with whatever
+        // buffer it just committed. Without this, Space's idea of a
+        // window's size goes stale the moment a client resizes.
+        if let Some(window) = window_for_surface(&self.space, surface) {
+            window.on_commit();
+        }
+
+        self.popups.commit(surface);
     }
 }
 
