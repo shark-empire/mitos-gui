@@ -6,15 +6,29 @@ on:
 
 jobs:
   build:
+    name: Build MITOS GUI
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      # --------------------------------------------------
+      # Checkout
+      # --------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # --------------------------------------------------
+      # Rust toolchain
+      # --------------------------------------------------
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # --------------------------------------------------
+      # Linux / Smithay dependencies
+      # --------------------------------------------------
       - name: Install GUI dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
             pkg-config \
             libudev-dev \
@@ -33,5 +47,51 @@ jobs:
             libegl1-mesa-dev \
             libgl1-mesa-dev
 
+      # --------------------------------------------------
+      # Verify required system libraries
+      # --------------------------------------------------
+      - name: Verify system dependencies
+        run: |
+          pkg-config --modversion libudev
+          pkg-config --modversion libinput
+          pkg-config --modversion libdrm
+          pkg-config --modversion gbm
+          pkg-config --modversion wayland-server
+
+      # --------------------------------------------------
+      # Cache Cargo dependencies
+      # --------------------------------------------------
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # --------------------------------------------------
+      # Check formatting
+      # --------------------------------------------------
+      - name: Cargo fmt
+        run: cargo fmt --all -- --check
+
+      # --------------------------------------------------
+      # Check project
+      # --------------------------------------------------
+      - name: Cargo check
+        run: cargo check --all-targets
+
+      # --------------------------------------------------
+      # Build
+      # --------------------------------------------------
       - name: Build
         run: cargo build --release
+
+      # --------------------------------------------------
+      # Run tests
+      # --------------------------------------------------
+      - name: Test
+        run: cargo test --all
