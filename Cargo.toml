@@ -1,0 +1,10 @@
+[package]
+name = "mitos-gui"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shark <banor3331@gmail.com>"]
+description = "Lightweight Wayland compositor for MITOS"
+
+[dependencies]
+smithay = "0.3"
+calloop = "0.12" # Event loop library for system inputs and display events
