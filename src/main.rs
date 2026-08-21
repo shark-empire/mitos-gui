@@ -75,7 +75,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             subpixel: Subpixel::Unknown,
             make: "MITOS".into(),
             model: "Virtual".into(),
-            serial_number: "0001".into(),
         },
     );
 
