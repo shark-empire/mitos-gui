@@ -1,5 +1,6 @@
 mod compositor;
 mod state;
+mod surface;
 mod theme;
 
 use calloop::EventLoop;
@@ -124,6 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI: compositor initialized");
     println!("MITOS GUI: XDG shell initialized");
     println!("MITOS GUI: shared memory initialized");
+    println!("MITOS GUI: window space initialized");
     println!("MITOS GUI: event loop running");
 
     loop {
@@ -138,6 +140,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::sync::Arc::new(compositor::MitosClientState::default()),
             )?;
         }
+
+        // Reconcile output enter/leave state for mapped windows and
+        // drop any popups whose parent surface is gone. Cheap, and
+        // needs to happen before every flush to stay accurate.
+        state.space.refresh();
+        state.popups.cleanup();
 
         display.dispatch_clients(&mut state)?;
         display.flush_clients()?;
