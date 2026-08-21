@@ -2,6 +2,8 @@
 
 use smithay::{
     delegate_compositor,
+    delegate_output,
+    delegate_seat,
     delegate_shm,
     delegate_xdg_shell,
 };
@@ -15,7 +17,7 @@ use smithay::wayland::{
         CompositorHandler,
         CompositorState,
     },
-    shm::{ShmHandler, ShmState},
+    output::OutputHandler,
     shell::xdg::{
         PopupSurface,
         PositionerState,
@@ -23,6 +25,7 @@ use smithay::wayland::{
         XdgShellHandler,
         XdgShellState,
     },
+    shm::{ShmHandler, ShmState},
 };
 
 use smithay::reexports::wayland_server::{
@@ -134,9 +137,16 @@ impl CompositorHandler for MitosGuiState {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-    on_commit_buffer_handler::<Self>(surface);
+        on_commit_buffer_handler::<Self>(surface);
+    }
 }
-}
+
+
+// ============================================================
+// OUTPUT
+// ============================================================
+
+impl OutputHandler for MitosGuiState {}
 
 
 // ============================================================
@@ -169,4 +179,5 @@ impl ClientData for MitosClientState {
 delegate_xdg_shell!(MitosGuiState);
 delegate_compositor!(MitosGuiState);
 delegate_shm!(MitosGuiState);
-
+delegate_output!(MitosGuiState);
+delegate_seat!(MitosGuiState);
