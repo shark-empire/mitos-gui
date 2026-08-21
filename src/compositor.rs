@@ -134,8 +134,8 @@ impl CompositorHandler for MitosGuiState {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        on_commit_buffer_handler::<Self>(surface);
-    }
+    on_commit_buffer_handler::<Self>(surface);
+}
 }
 
 
@@ -162,30 +162,6 @@ impl ClientData for MitosClientState {
     }
 }
 
-impl SeatHandler for MitosGuiState {
-    type KeyboardFocus = WlSurface;
-    type PointerFocus = WlSurface;
-    type TouchFocus = WlSurface;
-
-    fn seat_state(&mut self) -> &mut SeatState<Self> {
-        &mut self.seat_state
-    }
-
-    fn focus_changed(
-        &mut self,
-        _seat: &Seat<Self>,
-        _focused: Option<&WlSurface>,
-    ) {
-    }
-
-    fn cursor_image(
-        &mut self,
-        _seat: &Seat<Self>,
-        _image: CursorImageStatus,
-    ) {
-    }
-}
-
 // ============================================================
 // SMITHAY DELEGATES
 // ============================================================
@@ -193,4 +169,4 @@ impl SeatHandler for MitosGuiState {
 delegate_xdg_shell!(MitosGuiState);
 delegate_compositor!(MitosGuiState);
 delegate_shm!(MitosGuiState);
-delegate_seat!(MitosGuiState);
+
