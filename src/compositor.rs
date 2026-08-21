@@ -9,7 +9,6 @@ use smithay::{
 use smithay::wayland::{
     buffer::BufferHandler,
     compositor::{
-        on_commit_buffer_handler,
         CompositorClientState,
         CompositorHandler,
         CompositorState,
