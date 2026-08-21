@@ -7,6 +7,7 @@ use calloop::EventLoop;
 use smithay::input::SeatState;
 
 use smithay::reexports::wayland_server::Display;
+use smithay::reexports::wayland_server::ListeningSocket;
 
 use smithay::wayland::{
     compositor::CompositorState,
@@ -28,6 +29,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut display: Display<MitosGuiState> =
         Display::new()?;
+
+    let listening_socket = ListeningSocket::bind_auto("wayland", 0..10)
+    .expect("Failed to create Wayland listening socket");
+
+println!(
+    "MITOS GUI: Wayland socket created at {}",
+    listening_socket.socket_name()
+);
 
     let display_handle = display.handle();
 
@@ -83,13 +92,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI: seat initialized");
     println!("MITOS GUI: event loop running");
 
-    loop {
-        event_loop.dispatch(
-            std::time::Duration::from_millis(16),
-            &mut state,
-        )?;
+loop {
+    event_loop.dispatch(
+        std::time::Duration::from_millis(16),
+        &mut state,
+    )?;
 
-        display.dispatch_clients(&mut state)?;
-        display.flush_clients()?;
+    if let Some(stream) = listening_socket.accept()? {
+        display
+            .handle()
+            .insert_client(
+                stream,
+                std::sync::Arc::new(
+                    compositor::MitosClientState::default()
+                ),
+            )?;
     }
+
+    display.dispatch_clients(&mut state)?;
+    display.flush_clients()?;
+}
+
 }
