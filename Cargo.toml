@@ -7,15 +7,8 @@ description = "Lightweight, glass-inspired Wayland compositor and desktop enviro
 license = "MIT"
 
 [dependencies]
-# Wayland compositor framework
-smithay = "0.3"
-
-# Event loop
-calloop = "0.12"
-
-# Error handling
+smithay = "0.7"
+calloop = "0.14"
 anyhow = "1"
-
-# Logging
 log = "0.4"
 env_logger = "0.11"
