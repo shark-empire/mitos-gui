@@ -22,7 +22,7 @@ jobs:
             libinput-dev \
             libpixman-1-dev \
             libgbm-dev \
-            libdrm-dev\
+            libdrm-dev \
             libwayland-dev \
             libxkbcommon-dev \
             libx11-dev \
