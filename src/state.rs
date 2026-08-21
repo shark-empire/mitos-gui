@@ -7,11 +7,12 @@ use smithay::{
         SeatHandler,
         SeatState,
     },
+    output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::{
         compositor::CompositorState,
-        shm::ShmState,
         shell::xdg::XdgShellState,
+        shm::ShmState,
     },
 };
 
@@ -20,6 +21,8 @@ pub struct MitosGuiState {
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
     pub seat_state: SeatState<Self>,
+    pub seat: Seat<Self>,
+    pub output: Output,
 }
 
 impl MitosGuiState {
@@ -28,12 +31,16 @@ impl MitosGuiState {
         xdg_shell_state: XdgShellState,
         shm_state: ShmState,
         seat_state: SeatState<Self>,
+        seat: Seat<Self>,
+        output: Output,
     ) -> Self {
         Self {
             compositor_state,
             xdg_shell_state,
             shm_state,
             seat_state,
+            seat,
+            output,
         }
     }
 }
