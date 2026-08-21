@@ -101,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --------------------------------------------------------
 
     let mut seat_state = SeatState::<MitosGuiState>::new();
-    let seat = seat_state.new_wl_seat(&display_handle, "seat-0");
+    let mut seat = seat_state.new_wl_seat(&display_handle, "seat-0");
 
     seat.add_keyboard(XkbConfig::default(), 200, 25)?;
     seat.add_pointer();
