@@ -12,6 +12,7 @@ smithay = { version = "0.7", features = [
     "backend_winit",
     "renderer_gl",
 ] }
+wayland-protocols = { version = "0.32", features = ["server"] }
 
 calloop = "0.14"
 tracing = "0.1"
