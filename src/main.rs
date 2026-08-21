@@ -4,16 +4,15 @@ mod theme;
 
 use calloop::EventLoop;
 
-use smithay::reexports::wayland_server::Display;
 use smithay::input::SeatState;
+
+use smithay::reexports::wayland_server::Display;
 
 use smithay::wayland::{
     compositor::CompositorState,
     shm::ShmState,
     shell::xdg::XdgShellState,
 };
-
-
 
 use state::MitosGuiState;
 
@@ -60,22 +59,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &display_handle,
         );
 
+    // --------------------------------------------------------
+    // Seat
+    // --------------------------------------------------------
 
-    let seat_state = SeatState::<MitosGuiState>::new();
+    let seat_state =
+        SeatState::<MitosGuiState>::new();
+
     // --------------------------------------------------------
     // MITOS state
     // --------------------------------------------------------
 
     let mut state = MitosGuiState::new(
-    compositor_state,
-    xdg_shell_state,
-    shm_state,
-    seat_state,
-);
+        compositor_state,
+        xdg_shell_state,
+        shm_state,
+        seat_state,
+    );
 
     println!("MITOS GUI: compositor initialized");
     println!("MITOS GUI: XDG shell initialized");
     println!("MITOS GUI: shared memory initialized");
+    println!("MITOS GUI: seat initialized");
     println!("MITOS GUI: event loop running");
 
     loop {
