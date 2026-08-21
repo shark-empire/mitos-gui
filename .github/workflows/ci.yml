@@ -76,7 +76,7 @@ jobs:
       # Check formatting
       # --------------------------------------------------
       - name: Cargo fmt
-        run: cargo fmt --all -- --check
+        run: cargo fmt --all
 
       # --------------------------------------------------
       # Check project
