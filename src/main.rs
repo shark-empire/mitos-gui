@@ -8,23 +8,38 @@ pub struct MitosGuiState {
 }
 
 fn main() {
-    println!("mitos-gui [INFO]: Initializing Lightweight Wayland Display Server...");
+    println!("MITOS GUI");
+    println!("Initializing graphical environment...");
 
-    // 1. Initialize event loop
-    let mut event_loop: EventLoop<MitosGuiState> = EventLoop::try_new()
-        .expect("mitos-gui [FATAL]: Failed to create event loop.");
+    let mut event_loop: EventLoop<MitosGuiState> =
+        EventLoop::try_new()
+            .expect("MITOS GUI: failed to create event loop");
 
-    let display = smithay::reexports::wayland_server::Display::<MitosGuiState>::new()
-        .expect("mitos-gui [FATAL]: Failed to initialize Wayland display.");
+    let _display =
+        smithay::reexports::wayland_server::Display::<MitosGuiState>::new()
+            .expect("MITOS GUI: failed to create Wayland display");
 
-    println!("mitos-gui [OK]: Wayland socket bound.");
-    println!("mitos-gui [OK]: Compositor active. Ready for apps and games.");
+    println!("MITOS GUI: display initialized");
+    println!("MITOS GUI: compositor ready");
 
-    // 2. Main rendering & event loop
-    // Runs at low CPU/memory idle unless handling input or rendering frames
+    /*
+     * Temporary compositor state.
+     *
+     * The full Smithay compositor will be initialized here as
+     * we add rendering, surfaces, input, windows, and effects.
+     */
+
     loop {
-        event_loop
-            .dispatch(std::time::Duration::from_millis(16), &mut ())
-            .unwrap();
+        /*
+         * The event loop requires the actual MitosGuiState.
+         *
+         * This placeholder will be replaced when the compositor
+         * state is fully initialized.
+         */
+        std::thread::sleep(
+            std::time::Duration::from_millis(16)
+        );
+
+        let _ = &mut event_loop;
     }
 }
