@@ -3,12 +3,16 @@ name = "mitos-gui"
 version = "0.1.0"
 edition = "2021"
 authors = ["Shark <banor3331@gmail.com>"]
-description = "Lightweight, glass-inspired Wayland compositor and desktop environment for MITOS"
-license = "MIT"
+description = "Lightweight, modern Wayland compositor and desktop shell for MITOS"
 
 [dependencies]
-smithay = "0.7"
+smithay = { version = "0.7", features = [
+    "wayland_frontend",
+    "desktop",
+    "backend_winit",
+    "renderer_gl",
+] }
+
 calloop = "0.14"
-anyhow = "1"
-log = "0.4"
-env_logger = "0.11"
+tracing = "0.1"
+tracing-subscriber = "0.3"
