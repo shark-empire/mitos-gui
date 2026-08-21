@@ -1,5 +1,13 @@
+//! Global state for the MITOS compositor.
+
 use smithay::{
-    input::SeatState,
+    input::{
+        pointer::CursorImageStatus,
+        Seat,
+        SeatHandler,
+        SeatState,
+    },
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::{
         compositor::CompositorState,
         shm::ShmState,
@@ -27,5 +35,29 @@ impl MitosGuiState {
             shm_state,
             seat_state,
         }
+    }
+}
+
+impl SeatHandler for MitosGuiState {
+    type KeyboardFocus = WlSurface;
+    type PointerFocus = WlSurface;
+    type TouchFocus = WlSurface;
+
+    fn seat_state(&mut self) -> &mut SeatState<Self> {
+        &mut self.seat_state
+    }
+
+    fn focus_changed(
+        &mut self,
+        _seat: &Seat<Self>,
+        _focused: Option<&WlSurface>,
+    ) {
+    }
+
+    fn cursor_image(
+        &mut self,
+        _seat: &Seat<Self>,
+        _image: CursorImageStatus,
+    ) {
     }
 }
