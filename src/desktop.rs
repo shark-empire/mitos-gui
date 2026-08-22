@@ -42,7 +42,7 @@ impl Default for HomeScreenConfig {
         Self {
             background: MitosTheme::BACKGROUND,
             top_bar: true,
-            top_bar_height: 32.0,
+            top_bar_height: MitosTheme::TOP_BAR_HEIGHT,
         }
     }
 }
