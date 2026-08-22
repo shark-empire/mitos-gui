@@ -121,16 +121,94 @@ pub fn top_bar_color() -> Color32F {
     glass_color()
 }
 
+/// Build the visual layers of the MITOS top bar.
+///
+/// The current Stage 3 implementation intentionally uses ordinary
+/// solid-color render elements. This gives us translucent glass,
+/// highlight, border and shadow layers without pretending that
+/// Wayland itself provides a glass effect.
+///
+/// Blur and rounded corners will be implemented later as an actual
+/// renderer/shader pass.
+pub fn collect_top_bar_elements(
+    renderer: &mut GlesRenderer,
+    panel: &GlassPanel,
+    panel_buffer: &SolidColorBuffer,
+    shadow_buffer: &SolidColorBuffer,
+    highlight_buffer: &SolidColorBuffer,
+    border_buffer: &SolidColorBuffer,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+
+    let (x, y) = panel.position;
+    let (width, height) = panel.size;
+
+    // ------------------------------------------------------------
+    // Shadow
+    // ------------------------------------------------------------
+
+    elements.extend(
+        shadow_buffer.render_elements(
+            renderer,
+            (x, y + height).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    // ------------------------------------------------------------
+    // Main glass panel
+    // ------------------------------------------------------------
+
+    elements.extend(
+        panel_buffer.render_elements(
+            renderer,
+            (x, y).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    // ------------------------------------------------------------
+    // Top highlight
+    // ------------------------------------------------------------
+
+    elements.extend(
+        highlight_buffer.render_elements(
+            renderer,
+            (x, y).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    // ------------------------------------------------------------
+    // Bottom border
+    // ------------------------------------------------------------
+
+    elements.extend(
+        border_buffer.render_elements(
+            renderer,
+            (x, y + height - 1).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    elements
+}
+
 /// Collect render elements for one frame.
 ///
-/// The top bar is placed first, followed by client windows.
+/// The MITOS shell is placed first, followed by client windows.
 ///
 /// Windows are reversed so the frontmost window is processed first.
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
     scale: Scale<f64>,
-    top_bar: Option<&SolidColorBuffer>,
+    top_bar_elements: impl IntoIterator<Item = ChromeRenderElement>,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
 
@@ -138,16 +216,7 @@ pub fn collect_frame_elements(
     // MITOS shell
     // ------------------------------------------------------------
 
-    if let Some(top_bar) = top_bar {
-        elements.extend(
-            top_bar.render_elements(
-                renderer,
-                (0, 0).into(),
-                scale,
-                1.0,
-            ),
-        );
-    }
+    elements.extend(top_bar_elements);
 
     // ------------------------------------------------------------
     // Client windows
