@@ -14,6 +14,7 @@ use std::time::Duration;
 use calloop::EventLoop;
 
 use smithay::backend::renderer::damage::{Error as DamageTrackerError, OutputDamageTracker};
+use smithay::backend::renderer::element::solid::SolidColorBuffer;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::ImportMemWl;
 use smithay::backend::winit::{self, WinitEvent};
@@ -182,6 +183,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // dimensions.
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
 
+    // The top bar's pixels, persisted across frames rather than
+    // rebuilt each time -- `SolidColorBuffer::update` no-ops when the
+    // size and color haven't changed, so a motionless bar costs the
+    // damage tracker nothing after the frame it first appears in.
+    // Real size follows below, once `state.space` knows the output's
+    // logical geometry; (0, 0) here just avoids a second Option layer
+    // before that first update runs.
+    let mut top_bar_buffer = SolidColorBuffer::new((0, 0), renderer::top_bar_color());
+
     // Forces a handful of full-framebuffer redraws right after
     // anything that invalidates the backbuffer's contents wholesale
     // (startup, resize) instead of trusting possibly-stale damage.
@@ -243,8 +253,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let scale = Scale::from(output.current_scale().fractional_scale());
 
+        // Keep the top bar's buffer sized to the output's current
+        // logical width -- `output_geometry` already resolves mode and
+        // scale into logical pixels, so there's no manual physical/scale
+        // math to get wrong here. `update` is a no-op if nothing
+        // actually changed since last frame.
+        if state.home_screen.top_bar {
+            if let Some(output_geometry) = state.space.output_geometry(&output) {
+                let height = state.home_screen.top_bar_height.max(1.0).round() as i32;
+                top_bar_buffer.update((output_geometry.size.w, height), renderer::top_bar_color());
+            }
+        }
+
+        let top_bar = state.home_screen.top_bar.then_some(&top_bar_buffer);
+
         let render_result = backend.bind().and_then(|(renderer, mut framebuffer)| {
-            let elements = renderer::collect_window_elements(renderer, &state.space, scale);
+            let elements =
+                renderer::collect_frame_elements(renderer, &state.space, scale, top_bar);
 
             damage_tracker
                 .render_output(
