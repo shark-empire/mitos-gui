@@ -8,6 +8,7 @@ use smithay::{
             render_elements,
             solid::{SolidColorBuffer, SolidColorRenderElement},
             surface::WaylandSurfaceRenderElement,
+            AsRenderElements,
         },
         gles::GlesRenderer,
         Color32F,
