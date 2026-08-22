@@ -192,7 +192,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Real size follows below, once `state.space` knows the output's
     // logical geometry; (0, 0) here just avoids a second Option layer
     // before that first update runs.
-    let mut top_bar_buffer = SolidColorBuffer::new((0, 0), renderer::top_bar_color());
+let mut top_bar_buffer =
+    SolidColorBuffer::new((0, 0), renderer::top_bar_color());
+
+let mut top_bar_shadow_buffer =
+    SolidColorBuffer::new((0, 0), renderer::shadow_color());
+
+let mut top_bar_highlight_buffer =
+    SolidColorBuffer::new((0, 0), renderer::glass_highlight_color());
+
+let mut top_bar_border_buffer =
+    SolidColorBuffer::new((0, 0), {
+        let c = theme::MitosTheme::BORDER;
+        smithay::backend::renderer::Color32F::new(
+            c.r,
+            c.g,
+            c.b,
+            c.a,
+        )
+    });
 
     // Forces a handful of full-framebuffer redraws right after
     // anything that invalidates the backbuffer's contents wholesale
@@ -263,48 +281,93 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 if state.home_screen.top_bar {
     if let Some(output_geometry) = state.space.output_geometry(&output) {
         let width = output_geometry.size.w;
+
         let height = state
             .home_screen
             .top_bar_height
             .max(1.0)
             .round() as i32;
 
-        let panel = renderer::GlassPanel::top_bar(width, height);
-
+        // Main glass surface.
         top_bar_buffer.update(
-            panel.size,
-            panel.tint,
+            (width, height),
+            renderer::top_bar_color(),
         );
 
-        state.top_bar_panel = Some(panel);
+        // Soft shadow underneath the panel.
+        top_bar_shadow_buffer.update(
+            (width, 8),
+            renderer::shadow_color(),
+        );
+
+        // Thin glass highlight at the top.
+        top_bar_highlight_buffer.update(
+            (width, 2),
+            renderer::glass_highlight_color(),
+        );
+
+        // Thin bottom border.
+        let border = theme::MitosTheme::BORDER;
+
+        top_bar_border_buffer.update(
+            (width, 1),
+            smithay::backend::renderer::Color32F::new(
+                border.r,
+                border.g,
+                border.b,
+                border.a,
+            ),
+        );
+
+        state.top_bar_panel = Some(
+            renderer::GlassPanel::top_bar(
+                width,
+                height,
+            ),
+        );
     }
 } else {
     state.top_bar_panel = None;
 }
 
-       let top_bar = if state.top_bar_panel.is_some() {
-    Some(&top_bar_buffer)
-} else {
-    None
-};
 
-        let render_result = backend.bind().and_then(|(renderer, mut framebuffer)| {
-            let elements =
-                renderer::collect_frame_elements(renderer, &state.space, scale, top_bar);
+ let render_result = backend.bind().and_then(|(renderer, mut framebuffer)| {
+    let top_bar_elements = if let Some(panel) = state.top_bar_panel.as_ref() {
+        renderer::collect_top_bar_elements(
+            renderer,
+            panel,
+            &top_bar_buffer,
+            &top_bar_shadow_buffer,
+            &top_bar_highlight_buffer,
+            &top_bar_border_buffer,
+            scale,
+        )
+    } else {
+        Vec::new()
+    };
 
-            damage_tracker
-                .render_output(
-                    renderer,
-                    &mut framebuffer,
-                    age,
-                    &elements,
-                    renderer::clear_color(&state.home_screen),
-                )
-                .map_err(|err| match err {
-                    DamageTrackerError::Rendering(err) => err.into(),
-                    _ => unreachable!("output-mode errors can't happen: mode is always set above"),
-                })
-        });
+    let elements = renderer::collect_frame_elements(
+        renderer,
+        &state.space,
+        scale,
+        top_bar_elements,
+    );
+
+    damage_tracker
+        .render_output(
+            renderer,
+            &mut framebuffer,
+            age,
+            &elements,
+            renderer::clear_color(&state.home_screen),
+        )
+        .map_err(|err| match err {
+            DamageTrackerError::Rendering(err) => err.into(),
+            _ => unreachable!(
+                "output-mode errors can't happen: mode is always set above"
+            ),
+        })
+});
 
         match render_result {
             Ok(render_output_result) => {
