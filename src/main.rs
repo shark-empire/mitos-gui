@@ -176,6 +176,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         seat,
         output.clone(),
         home_screen,
+        None,
     );
 
     // Damage tracking: rebuilt from scratch on resize (see the
