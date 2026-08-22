@@ -81,7 +81,7 @@ impl MitosGuiState {
         seat: Seat<Self>,
         output: Output,
         home_screen: HomeScreenConfig,
-        top_bar_panel: None,
+        top_bar_panel: Option<GlassPanel>,
     ) -> Self {
         let mut space = Space::default();
         space.map_output(&output, (0, 0));
@@ -95,6 +95,7 @@ impl MitosGuiState {
             output,
             home_screen,
             space,
+            top_bar_panel,
             popups: PopupManager::default(),
             pointer_location: (0.0, 0.0).into(),
             clock: Clock::new(),
