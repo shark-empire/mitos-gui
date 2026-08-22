@@ -39,7 +39,6 @@ use smithay::{
             solid::{SolidColorBuffer, SolidColorRenderElement},
             surface::WaylandSurfaceRenderElement,
             AsRenderElements,
-            Kind,
         },
         gles::GlesRenderer,
         Color32F,
@@ -56,12 +55,7 @@ render_elements! {
     pub ChromeRenderElement<=GlesRenderer>;
 
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
-
-    Glass=SolidColorRenderElement,
-
-    GlassHighlight=SolidColorRenderElement,
-
-    Shadow=SolidColorRenderElement,
+    SolidColor=SolidColorRenderElement,
 }
 
 /// The color the framebuffer is cleared to before anything else is
