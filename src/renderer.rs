@@ -21,8 +21,10 @@
 //! color the framebuffer gets cleared to first.
 //!
 //! Stage 3 is what actually makes this interesting to look at -- glass
-//! panels, blur, rounded corners, the wallpaper. For now every window
-//! is just its own client-drawn pixels, floating on a flat background.
+//! panels, blur, rounded corners, the top bar. Wallpaper customization
+//! (`clear_color` below, driven by `desktop::HomeScreenConfig`) is the
+//! first piece; every window is still just its own client-drawn pixels
+//! floating on top of it.
 
 use smithay::{
     backend::renderer::{element::AsRenderElements, gles::GlesRenderer, Color32F},
@@ -30,16 +32,19 @@ use smithay::{
     utils::Scale,
 };
 
+use crate::desktop::HomeScreenConfig;
+
 pub use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 
 /// The color the framebuffer is cleared to before anything else is
 /// drawn -- i.e. what's visible through/behind every mapped window.
 ///
-/// Stage 3 replaces this flat fill with the actual wallpaper; today
-/// it's just `MitosTheme::BACKGROUND`, so an empty desktop still reads
-/// as "MITOS" rather than a random GL clear color.
-pub fn clear_color() -> Color32F {
-    let c = crate::theme::MitosTheme::BACKGROUND;
+/// Reads from `HomeScreenConfig` rather than `MitosTheme::BACKGROUND`
+/// directly, so the empty desktop reflects whatever the user set in
+/// `~/.config/mitos/home.conf` instead of always being the built-in
+/// default.
+pub fn clear_color(home_screen: &HomeScreenConfig) -> Color32F {
+    let c = home_screen.background;
     Color32F::new(c.r, c.g, c.b, c.a)
 }
 
