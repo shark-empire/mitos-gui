@@ -1,3 +1,4 @@
+mod animation;
 mod compositor;
 mod desktop;
 mod input;
