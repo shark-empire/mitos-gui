@@ -1,4 +1,5 @@
 mod compositor;
+mod desktop;
 mod input;
 mod keyboard;
 mod pointer;
@@ -152,6 +153,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI: seat-0 registered (keyboard + pointer)");
 
     // --------------------------------------------------------
+    // Home screen configuration (Stage 3)
+    //
+    // Loaded once, up front -- clear_color() reads the resolved
+    // struct every frame, not the config file.
+    // --------------------------------------------------------
+
+    let home_screen = desktop::HomeScreenConfig::load();
+
+    // --------------------------------------------------------
     // MITOS state
     // --------------------------------------------------------
 
@@ -162,6 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         seat_state,
         seat,
         output.clone(),
+        home_screen,
     );
 
     // Damage tracking: rebuilt from scratch on resize (see the
@@ -240,7 +251,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &mut framebuffer,
                     age,
                     &elements,
-                    renderer::clear_color(),
+                    renderer::clear_color(&state.home_screen),
                 )
                 .map_err(|err| match err {
                     DamageTrackerError::Rendering(err) => err.into(),
