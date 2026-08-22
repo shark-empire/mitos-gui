@@ -8,6 +8,7 @@ use smithay::backend::input::{
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::output::Output;
 use smithay::utils::SERIAL_COUNTER;
+use smithay::wayland::seat::WaylandFocus;
 
 use crate::state::MitosGuiState;
 
