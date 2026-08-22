@@ -209,7 +209,6 @@ void main() {{
 pub fn collect_top_bar_elements(
     panel: &GlassPanel,
     glass_panel: &mut PixelShaderElement,
-    panel_buffer: &SolidColorBuffer,
     shadow_buffer: &SolidColorBuffer,
     highlight_buffer: &SolidColorBuffer,
     border_buffer: &SolidColorBuffer,
@@ -278,9 +277,7 @@ pub fn collect_top_bar_elements(
         ),
     );
 
-    // Keep this parameter for now because the existing call site
-    // owns the panel buffer. The actual glass fill is shader-driven.
-    let _ = panel_buffer;
+
 
     elements
 }
