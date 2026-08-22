@@ -192,8 +192,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Real size follows below, once `state.space` knows the output's
     // logical geometry; (0, 0) here just avoids a second Option layer
     // before that first update runs.
-let mut top_bar_buffer =
-    SolidColorBuffer::new((0, 0), renderer::top_bar_color());
 
 let mut top_bar_shadow_buffer =
     SolidColorBuffer::new((0, 0), renderer::shadow_color());
@@ -211,7 +209,11 @@ let mut top_bar_border_buffer =
             c.a,
         )
     });
-
+    
+let mut glass_panel_element =
+    renderer::create_glass_panel_element(
+        backend.renderer()
+    )?;
     // Forces a handful of full-framebuffer redraws right after
     // anything that invalidates the backbuffer's contents wholesale
     // (startup, resize) instead of trusting possibly-stale damage.
@@ -288,11 +290,7 @@ if state.home_screen.top_bar {
             .max(1.0)
             .round() as i32;
 
-        // Main glass surface.
-        top_bar_buffer.update(
-            (width, height),
-            renderer::top_bar_color(),
-        );
+
 
         // Soft shadow underneath the panel.
         top_bar_shadow_buffer.update(
@@ -334,14 +332,14 @@ if state.home_screen.top_bar {
  let render_result = backend.bind().and_then(|(renderer, mut framebuffer)| {
     let top_bar_elements = if let Some(panel) = state.top_bar_panel.as_ref() {
         renderer::collect_top_bar_elements(
-            renderer,
-            panel,
-            &top_bar_buffer,
-            &top_bar_shadow_buffer,
-            &top_bar_highlight_buffer,
-            &top_bar_border_buffer,
-            scale,
-        )
+    panel,
+    &mut glass_panel_element,
+    &top_bar_shadow_buffer,
+    &top_bar_highlight_buffer,
+    &top_bar_border_buffer,
+    renderer,
+    scale,
+)
     } else {
         Vec::new()
     };
