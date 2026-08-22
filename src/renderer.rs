@@ -39,6 +39,7 @@ use smithay::{
             solid::{SolidColorBuffer, SolidColorRenderElement},
             surface::WaylandSurfaceRenderElement,
             AsRenderElements,
+            Kind,
         },
         gles::GlesRenderer,
         Color32F,
@@ -51,14 +52,16 @@ use crate::desktop::HomeScreenConfig;
 use crate::theme::MitosTheme;
 
 render_elements! {
-    /// Everything `collect_frame_elements` can hand the damage tracker
-    /// in one call: a client's own pixels (`Surface`), or a flat panel
-    /// MITOS draws itself (`SolidColor`) -- just the top bar today,
-    /// with window glass chrome the obvious next thing to route
-    /// through this same variant once Stage 3 gets there.
+    /// All renderable objects used by MITOS.
     pub ChromeRenderElement<=GlesRenderer>;
+
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
-    SolidColor=SolidColorRenderElement,
+
+    Glass=SolidColorRenderElement,
+
+    GlassHighlight=SolidColorRenderElement,
+
+    Shadow=SolidColorRenderElement,
 }
 
 /// The color the framebuffer is cleared to before anything else is
@@ -73,6 +76,42 @@ pub fn clear_color(home_screen: &HomeScreenConfig) -> Color32F {
     Color32F::new(c.r, c.g, c.b, c.a)
 }
 
+/// Main translucent MITOS glass color.
+pub fn glass_color() -> Color32F {
+    let c = MitosTheme::GLASS;
+
+    Color32F::new(
+        c.r,
+        c.g,
+        c.b,
+        c.a,
+    )
+}
+
+/// Subtle highlight used to give the panel a layered appearance.
+pub fn glass_highlight_color() -> Color32F {
+    let c = MitosTheme::GLASS_HIGHLIGHT;
+
+    Color32F::new(
+        c.r,
+        c.g,
+        c.b,
+        c.a,
+    )
+}
+
+/// Shadow color used behind shell panels.
+pub fn shadow_color() -> Color32F {
+    let c = MitosTheme::SHADOW;
+
+    Color32F::new(
+        c.r,
+        c.g,
+        c.b,
+        c.a,
+    )
+}
+
 /// The glass tint chrome panels are drawn with -- the top bar today.
 ///
 /// Unlike `clear_color`, this doesn't read `HomeScreenConfig`: the
@@ -82,8 +121,7 @@ pub fn clear_color(home_screen: &HomeScreenConfig) -> Color32F {
 /// override. `home.conf` only controls whether the bar is drawn at
 /// all and how tall it is (`top_bar` / `top_bar_height`).
 pub fn top_bar_color() -> Color32F {
-    let c = MitosTheme::GLASS;
-    Color32F::new(c.r, c.g, c.b, c.a)
+    glass_color()
 }
 
 /// Collects render elements for one frame: the top bar first (if
@@ -118,25 +156,44 @@ pub fn collect_frame_elements(
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
 
+    // ------------------------------------------------------------
+    // MITOS shell
+    // ------------------------------------------------------------
+
     if let Some(top_bar) = top_bar {
-        elements.extend(top_bar.render_elements(renderer, (0, 0).into(), scale, 1.0));
+        elements.extend(
+            top_bar.render_elements(
+                renderer,
+                (0, 0).into(),
+                scale,
+                1.0,
+            )
+        );
     }
+
+    // ------------------------------------------------------------
+    // Client windows
+    // ------------------------------------------------------------
 
     for window in space.elements().rev() {
         let Some(location) = space.element_location(window) else {
             continue;
         };
 
-        // Logical -> physical, rounded to whole pixels -- the same
-        // conversion chain used for cursor placement, kept consistent
-        // here for anything that mixes window and cursor coordinates
-        // later (e.g. Stage 4's resize handles).
-        let physical_location = location.to_f64().to_physical(scale).to_i32_round();
+        let physical_location =
+            location
+                .to_f64()
+                .to_physical(scale)
+                .to_i32_round();
 
-        // `Window` implements `AsRenderElements`, which walks the
-        // window's whole surface tree (subsurfaces included) for us --
-        // no need to fetch `wl_surface()` and walk it by hand.
-        elements.extend(window.render_elements(renderer, physical_location, scale, 1.0));
+        elements.extend(
+            window.render_elements(
+                renderer,
+                physical_location,
+                scale,
+                1.0,
+            )
+        );
     }
 
     elements
