@@ -18,6 +18,8 @@ use smithay::{
     },
 };
 
+use crate::desktop::HomeScreenConfig;
+
 pub struct MitosGuiState {
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -25,6 +27,16 @@ pub struct MitosGuiState {
     pub seat_state: SeatState<Self>,
     pub seat: Seat<Self>,
     pub output: Output,
+
+    // --------------------------------------------------------
+    // Home screen (Stage 3)
+    //
+    // Wallpaper/background color, loaded once at startup by
+    // `desktop::HomeScreenConfig::load()` and read every frame by
+    // `renderer::clear_color()`. Panels and the top bar grow this
+    // struct rather than becoming state fields of their own.
+    // --------------------------------------------------------
+    pub home_screen: HomeScreenConfig,
 
     // --------------------------------------------------------
     // Desktop tracking
@@ -65,6 +77,7 @@ impl MitosGuiState {
         seat_state: SeatState<Self>,
         seat: Seat<Self>,
         output: Output,
+        home_screen: HomeScreenConfig,
     ) -> Self {
         let mut space = Space::default();
         space.map_output(&output, (0, 0));
@@ -76,6 +89,7 @@ impl MitosGuiState {
             seat_state,
             seat,
             output,
+            home_screen,
             space,
             popups: PopupManager::default(),
             pointer_location: (0.0, 0.0).into(),
