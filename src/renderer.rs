@@ -58,6 +58,30 @@ impl GlassPanel {
     }
 }
 
+/// Desktop background configuration used by the MITOS shell.
+///
+/// The background is deliberately renderer-owned. Wayland clients
+/// never control the desktop wallpaper.
+#[derive(Clone, Copy, Debug)]
+pub struct DesktopBackground {
+    pub color: Color32F,
+}
+
+impl DesktopBackground {
+    pub fn from_home_screen(home_screen: &HomeScreenConfig) -> Self {
+        let c = home_screen.background;
+
+        Self {
+            color: Color32F::new(
+                c.r,
+                c.g,
+                c.b,
+                c.a,
+            ),
+        }
+    }
+}
+
 render_elements! {
     pub ChromeRenderElement<=GlesRenderer>;
 
