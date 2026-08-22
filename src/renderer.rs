@@ -54,6 +54,31 @@ render_elements! {
     /// All renderable objects used by MITOS.
     pub ChromeRenderElement<=GlesRenderer>;
 
+    #[derive(Clone, Copy, Debug)]
+pub struct GlassPanel {
+    pub position: (i32, i32),
+    pub size: (i32, i32),
+    pub radius: f32,
+
+    pub tint: Color32F,
+    pub border: Color32F,
+}
+
+impl GlassPanel {
+    pub fn top_bar(width: i32, height: i32) -> Self {
+        Self {
+            position: (0, 0),
+            size: (width, height),
+            radius: MitosTheme::PANEL_RADIUS,
+
+            tint: glass_color(),
+            border: {
+                let c = MitosTheme::BORDER;
+                Color32F::new(c.r, c.g, c.b, c.a)
+            },
+        }
+    }
+}
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     SolidColor=SolidColorRenderElement,
 }
