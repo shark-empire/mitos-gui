@@ -1,18 +1,31 @@
 mod compositor;
+mod input;
+mod keyboard;
+mod pointer;
+mod renderer;
 mod state;
 mod surface;
 mod theme;
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use calloop::EventLoop;
+
+use smithay::backend::renderer::damage::{Error as DamageTrackerError, OutputDamageTracker};
+use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::winit::{self, WinitEvent};
+use smithay::backend::SwapBuffersError;
 
 use smithay::input::keyboard::XkbConfig;
 use smithay::input::SeatState;
 
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
-use smithay::utils::Transform;
+use smithay::utils::{Scale, Transform};
 
 use smithay::reexports::wayland_server::Display;
 use smithay::reexports::wayland_server::ListeningSocket;
+use smithay::reexports::winit::platform::pump_events::PumpStatus;
 
 use smithay::wayland::{
     compositor::CompositorState,
@@ -21,6 +34,8 @@ use smithay::wayland::{
 };
 
 use state::MitosGuiState;
+
+const OUTPUT_NAME: &str = "MITOS-0";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI");
@@ -44,6 +59,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let display_handle = display.handle();
 
     // --------------------------------------------------------
+    // GPU backend
+    //
+    // winit stands in for real display hardware until Stage 5 wires up
+    // DRM/GBM: it hands us a real GLES context plus a host window to
+    // present into, and doubles as our input source (forwarding host
+    // keyboard/mouse events) in the meantime. Nothing downstream of
+    // this call -- the renderer, the damage tracker, input.rs -- knows
+    // or cares that it isn't real hardware yet.
+    // --------------------------------------------------------
+
+    let (mut backend, mut winit_event_loop) = winit::init::<GlesRenderer>()?;
+
+    println!("MITOS GUI: GLES renderer initialized (winit backend)");
+
+    // --------------------------------------------------------
     // Wayland compositor
     // --------------------------------------------------------
 
@@ -51,9 +81,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --------------------------------------------------------
     // Shared memory buffers
+    //
+    // Seeded with whatever pixel formats the GLES renderer actually
+    // supports, on top of the ARGB8888/XRGB8888 pair `ShmState::new`
+    // always advertises regardless.
     // --------------------------------------------------------
 
-    let shm_state = ShmState::new::<MitosGuiState>(&display_handle, vec![]);
+    let mut shm_state = ShmState::new::<MitosGuiState>(&display_handle, vec![]);
+    shm_state.update_formats(backend.renderer().shm_formats());
 
     // --------------------------------------------------------
     // XDG shell
@@ -64,13 +99,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --------------------------------------------------------
     // Output
     //
-    // Virtual output until Stage 5 wires real DRM/KMS hardware.
-    // Advertising at least one wl_output is required for most
-    // real clients (GTK, Qt, etc.) to map a surface at all.
+    // Sized to match whatever window winit actually opened, rather
+    // than a hardcoded 1920x1080 — Stage 5's real DRM output will
+    // report its own mode the same way, through the same `Output`.
     // --------------------------------------------------------
 
     let output = Output::new(
-        "MITOS-0".to_string(),
+        OUTPUT_NAME.to_string(),
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
@@ -82,20 +117,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _output_global = output.create_global::<MitosGuiState>(&display_handle);
 
     let mode = Mode {
-        size: (1920, 1080).into(),
+        size: backend.window_size(),
         refresh: 60_000,
     };
 
+    // GLES renders into a framebuffer that's vertically flipped
+    // relative to winit's window; telling the output it's
+    // `Flipped180` keeps the coordinate space damage tracking works in
+    // consistent with what winit actually presents on screen.
     output.change_current_state(
         Some(mode),
-        Some(Transform::Normal),
+        Some(Transform::Flipped180),
         None,
         Some((0, 0).into()),
     );
 
     output.set_preferred(mode);
 
-    println!("MITOS GUI: output MITOS-0 registered (1920x1080@60)");
+    println!(
+        "MITOS GUI: output {OUTPUT_NAME} registered ({}x{}@60)",
+        mode.size.w, mode.size.h
+    );
 
     // --------------------------------------------------------
     // Seat (keyboard + pointer capabilities)
@@ -119,8 +161,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         shm_state,
         seat_state,
         seat,
-        output,
+        output.clone(),
     );
+
+    // Damage tracking: rebuilt from scratch on resize (see the
+    // `WinitEvent::Resized` arm below), since a resized output
+    // invalidates whatever damage state was tracked against its old
+    // dimensions.
+    let mut damage_tracker = OutputDamageTracker::from_output(&output);
+
+    // Forces a handful of full-framebuffer redraws right after
+    // anything that invalidates the backbuffer's contents wholesale
+    // (startup, resize) instead of trusting possibly-stale damage.
+    let mut full_redraw_frames: u8 = 0;
 
     println!("MITOS GUI: compositor initialized");
     println!("MITOS GUI: XDG shell initialized");
@@ -129,16 +182,100 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI: event loop running");
 
     loop {
-        event_loop.dispatch(
-            std::time::Duration::from_millis(16),
-            &mut state,
-        )?;
+        // --------------------------------------------------------
+        // Input
+        //
+        // winit's pump delivers host keyboard/mouse events plus resize
+        // notifications for the window it owns, non-blocking.
+        // --------------------------------------------------------
+
+        let pump_status = winit_event_loop.dispatch_new_events(|event| match event {
+            WinitEvent::Resized { size, .. } => {
+                let mode = Mode {
+                    size,
+                    refresh: 60_000,
+                };
+                output.change_current_state(Some(mode), None, None, None);
+                output.set_preferred(mode);
+
+                damage_tracker = OutputDamageTracker::from_output(&output);
+                full_redraw_frames = 4;
+            }
+            WinitEvent::Input(event) => {
+                input::process_input_event(&mut state, &output, event);
+            }
+            _ => {}
+        });
+
+        if let PumpStatus::Exit(_) = pump_status {
+            println!("MITOS GUI: window closed, shutting down");
+            break;
+        }
 
         if let Some(stream) = listening_socket.accept()? {
             display.handle().insert_client(
                 stream,
-                std::sync::Arc::new(compositor::MitosClientState::default()),
+                Arc::new(compositor::MitosClientState::default()),
             )?;
+        }
+
+        // --------------------------------------------------------
+        // Render
+        // --------------------------------------------------------
+
+        let age = if full_redraw_frames > 0 {
+            0
+        } else {
+            backend.buffer_age().unwrap_or(0)
+        };
+
+        let scale = Scale::from(output.current_scale().fractional_scale());
+
+        let render_result = backend.bind().and_then(|(renderer, mut framebuffer)| {
+            let elements = renderer::collect_window_elements(renderer, &state.space, scale);
+
+            damage_tracker
+                .render_output(
+                    renderer,
+                    &mut framebuffer,
+                    age,
+                    &elements,
+                    renderer::clear_color(),
+                )
+                .map_err(|err| match err {
+                    DamageTrackerError::Rendering(err) => err.into(),
+                    _ => unreachable!("output-mode errors can't happen: mode is always set above"),
+                })
+        });
+
+        match render_result {
+            Ok(render_output_result) => {
+                if let Some(damage) = render_output_result.damage {
+                    if let Err(err) = backend.submit(Some(damage)) {
+                        tracing::warn!("MITOS GUI: failed to submit frame: {err}");
+                    }
+                }
+
+                full_redraw_frames = full_redraw_frames.saturating_sub(1);
+
+                // Frame scheduling: tell every mapped client its last
+                // frame was presented, so well-behaved clients throttle
+                // redraws to this output's refresh rate instead of
+                // rendering in a tight loop.
+                let now = state.clock.now();
+                for window in state.space.elements() {
+                    window.send_frame(&output, now, Some(Duration::from_secs(1)), |_, _| {
+                        Some(output.clone())
+                    });
+                }
+            }
+            Err(SwapBuffersError::ContextLost(err)) => {
+                tracing::error!("MITOS GUI: critical rendering error, exiting: {err}");
+                break;
+            }
+            Err(err) => {
+                tracing::warn!("MITOS GUI: render error: {err}");
+            }
         }
 
         // Reconcile output enter/leave state for mapped windows and
@@ -149,5 +286,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         display.dispatch_clients(&mut state)?;
         display.flush_clients()?;
+
+        event_loop.dispatch(Duration::from_millis(1), &mut state)?;
     }
+
+    Ok(())
 }

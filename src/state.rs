@@ -10,6 +10,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Clock, Logical, Monotonic, Point},
     wayland::{
         compositor::CompositorState,
         shell::xdg::XdgShellState,
@@ -38,6 +39,22 @@ pub struct MitosGuiState {
     // --------------------------------------------------------
     pub space: Space<Window>,
     pub popups: PopupManager,
+
+    // --------------------------------------------------------
+    // Input (Stage 2)
+    //
+    // `pointer_location` is the single source of truth for "where is
+    // the cursor right now" -- input.rs updates it on every motion
+    // event, and the renderer (once Stage 3 draws a cursor sprite
+    // instead of relying on the host's) will read it from here too.
+    //
+    // `clock` backs the timestamps handed to clients in frame-done
+    // callbacks after each render, so their `wl_surface.frame`
+    // requests resolve against a real monotonic clock rather than
+    // whatever `Instant` happened to be lying around.
+    // --------------------------------------------------------
+    pub pointer_location: Point<f64, Logical>,
+    pub clock: Clock<Monotonic>,
 }
 
 impl MitosGuiState {
@@ -61,6 +78,8 @@ impl MitosGuiState {
             output,
             space,
             popups: PopupManager::default(),
+            pointer_location: (0.0, 0.0).into(),
+            clock: Clock::new(),
         }
     }
 }
