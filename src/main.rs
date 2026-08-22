@@ -260,32 +260,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // scale into logical pixels, so there's no manual physical/scale
         // math to get wrong here. `update` is a no-op if nothing
         // actually changed since last frame.
-        if state.home_screen.top_bar {
+if state.home_screen.top_bar {
     if let Some(output_geometry) = state.space.output_geometry(&output) {
-        let height =
-            state
-                .home_screen
-                .top_bar_height
-                .max(1.0)
-                .round() as i32;
+        let width = output_geometry.size.w;
+        let height = state
+            .home_screen
+            .top_bar_height
+            .max(1.0)
+            .round() as i32;
+
+        let panel = renderer::GlassPanel::top_bar(width, height);
 
         top_bar_buffer.update(
-            (output_geometry.size.w, height),
-            renderer::top_bar_color(),
+            panel.size,
+            panel.tint,
         );
 
-        state.top_bar_panel = Some(
-            renderer::GlassPanel::top_bar(
-                output_geometry.size.w,
-                height,
-            )
-        );
+        state.top_bar_panel = Some(panel);
     }
 } else {
     state.top_bar_panel = None;
 }
 
-        let top_bar = state.home_screen.top_bar.then_some(&top_bar_buffer);
+       let top_bar = if state.top_bar_panel.is_some() {
+    Some(&top_bar_buffer)
+} else {
+    None
+};
 
         let render_result = backend.bind().and_then(|(renderer, mut framebuffer)| {
             let elements =
