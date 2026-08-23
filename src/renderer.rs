@@ -58,28 +58,50 @@ impl GlassPanel {
     }
 }
 
-/// Desktop background configuration used by the MITOS shell.
-///
-/// The background is deliberately renderer-owned. Wayland clients
-/// never control the desktop wallpaper.
+#[derive(Clone, Copy, Debug)]
+pub enum BackgroundMode {
+    Solid(Color32F),
+    Gradient {
+        top: Color32F,
+        bottom: Color32F,
+    },
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct DesktopBackground {
-    pub color: Color32F,
+    pub mode: BackgroundMode,
 }
 
 impl DesktopBackground {
-    pub fn from_home_screen(home_screen: &HomeScreenConfig) -> Self {
+    pub fn from_home_screen(
+        home_screen: &HomeScreenConfig,
+    ) -> Self {
         let c = home_screen.background;
 
         Self {
-            color: Color32F::new(
-                c.r,
-                c.g,
-                c.b,
-                c.a,
+            mode: BackgroundMode::Solid(
+                Color32F::new(
+                    c.r,
+                    c.g,
+                    c.b,
+                    c.a,
+                ),
             ),
         }
     }
+}
+
+pub fn background_color(
+    home_screen: &HomeScreenConfig,
+) -> Color32F {
+    let c = home_screen.background;
+
+    Color32F::new(
+        c.r,
+        c.g,
+        c.b,
+        c.a,
+    )
 }
 
 render_elements! {
@@ -93,15 +115,10 @@ render_elements! {
 /// Color used to clear the framebuffer.
 ///
 /// The desktop wallpaper/background comes from `HomeScreenConfig`.
-pub fn clear_color(home_screen: &HomeScreenConfig) -> Color32F {
-    let c = home_screen.background;
-
-    Color32F::new(
-        c.r,
-        c.g,
-        c.b,
-        c.a,
-    )
+pub fn clear_color(
+    home_screen: &HomeScreenConfig,
+) -> Color32F {
+    background_color(home_screen)
 }
 
 /// Main translucent MITOS glass color.
