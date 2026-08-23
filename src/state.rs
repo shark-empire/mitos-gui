@@ -1,6 +1,7 @@
 //! Global state for the MITOS compositor.
+
+use crate::desktop::HomeScreenConfig;
 use crate::renderer::GlassPanel;
-use crate::renderer::MitosShell;
 
 use smithay::{
     desktop::{PopupManager, Space, Window},
@@ -20,84 +21,131 @@ use smithay::{
     },
 };
 
-use crate::desktop::HomeScreenConfig;
+// ============================================================================
+// MITOS SHELL
+// ============================================================================
 
-pub struct MitosGuiState {
-    pub compositor_state: CompositorState,
-    pub xdg_shell_state: XdgShellState,
-    pub shm_state: ShmState,
-    pub seat_state: SeatState<Self>,
-    pub seat: Seat<Self>,
-    pub shell: MitosShell,
-    pub output: Output,
-    
-    
-
-
-    
+/// State owned by the MITOS visual shell.
+///
+/// The renderer is responsible for drawing these components.
+/// This struct is responsible only for describing their state and geometry.
+#[derive(Debug)]
 pub struct MitosShell {
+    /// Main MITOS top bar.
     pub top_bar: Option<GlassPanel>,
 
+    /// Application launcher panel.
     pub launcher: Option<GlassPanel>,
 
+    /// Desktop dock.
     pub dock: Option<GlassPanel>,
 
+    /// Whether the launcher is currently visible.
     pub launcher_visible: bool,
 }
 
 impl MitosShell {
+    /// Create an empty MITOS shell.
     pub fn new() -> Self {
-  Self {
-    top_bar: None,
-    launcher: None,
-    dock: None,
-    launcher_visible: false,
-     }
+        Self {
+            top_bar: None,
+            launcher: None,
+            dock: None,
+            launcher_visible: false,
+        }
     }
 }
-    // --------------------------------------------------------
-    // Home screen (Stage 3)
-    //
-    // Wallpaper/background color, loaded once at startup by
-    // `desktop::HomeScreenConfig::load()` and read every frame by
-    // `renderer::clear_color()`. Panels and the top bar grow this
-    // struct rather than becoming state fields of their own.
-    // --------------------------------------------------------
+
+// ============================================================================
+// GLOBAL COMPOSITOR STATE
+// ============================================================================
+
+/// Global state for the MITOS compositor.
+///
+/// This is the central state object shared by:
+///
+/// - the Wayland compositor
+/// - XDG shell
+/// - input handling
+/// - window management
+/// - renderer
+/// - MITOS shell
+/// - desktop/background
+pub struct MitosGuiState {
+    // ------------------------------------------------------------------------
+    // Wayland protocol state
+    // ------------------------------------------------------------------------
+
+    /// Wayland compositor state.
+    pub compositor_state: CompositorState,
+
+    /// XDG shell state.
+    pub xdg_shell_state: XdgShellState,
+
+    /// Shared-memory buffer state.
+    pub shm_state: ShmState,
+
+    // ------------------------------------------------------------------------
+    // Input
+    // ------------------------------------------------------------------------
+
+    /// Wayland seat state.
+    pub seat_state: SeatState<Self>,
+
+    /// MITOS seat containing keyboard and pointer capabilities.
+    pub seat: Seat<Self>,
+
+    // ------------------------------------------------------------------------
+    // MITOS shell
+    // ------------------------------------------------------------------------
+
+    /// Visual shell state.
+    pub shell: MitosShell,
+
+    // ------------------------------------------------------------------------
+    // Output
+    // ------------------------------------------------------------------------
+
+    /// Current compositor output.
+    pub output: Output,
+
+    // ------------------------------------------------------------------------
+    // Desktop
+    // ------------------------------------------------------------------------
+
+    /// Home-screen and wallpaper configuration.
     pub home_screen: HomeScreenConfig,
 
-    // --------------------------------------------------------
-    // Desktop tracking
-    //
-    // `space` is the 2D plane windows and outputs are mapped onto.
-    // It's the single source of truth for "what exists and where" —
-    // the renderer (Stage 2) will iterate it to know what to draw,
-    // and the window manager (Stage 4) will move things around in it.
-    //
-    // `popups` tracks xdg_popup surfaces (menus, tooltips) so their
-    // lifecycle and positioning can be resolved against their parent.
-    // --------------------------------------------------------
+    /// Desktop space containing outputs and client windows.
     pub space: Space<Window>,
+
+    /// XDG popup manager.
     pub popups: PopupManager,
 
-    // --------------------------------------------------------
-    // Input (Stage 2)
-    //
-    // `pointer_location` is the single source of truth for "where is
-    // the cursor right now" -- input.rs updates it on every motion
-    // event, and the renderer (once Stage 3 draws a cursor sprite
-    // instead of relying on the host's) will read it from here too.
-    //
-    // `clock` backs the timestamps handed to clients in frame-done
-    // callbacks after each render, so their `wl_surface.frame`
-    // requests resolve against a real monotonic clock rather than
-    // whatever `Instant` happened to be lying around.
-    // --------------------------------------------------------
+    // ------------------------------------------------------------------------
+    // Pointer / timing
+    // ------------------------------------------------------------------------
+
+    /// Current pointer position in logical coordinates.
     pub pointer_location: Point<f64, Logical>,
+
+    /// Monotonic compositor clock.
     pub clock: Clock<Monotonic>,
+
+    // ------------------------------------------------------------------------
+    // Renderer-facing shell geometry
+    // ------------------------------------------------------------------------
+
+    /// Current top-bar panel geometry.
+    ///
+    /// This is kept separately while the Stage 3 renderer is being built.
+    /// Eventually the complete shell geometry can be managed through
+    /// `MitosShell`.
     pub top_bar_panel: Option<GlassPanel>,
 }
 
 impl MitosGuiState {
+    /// Create the initial MITOS compositor state.
     pub fn new(
         compositor_state: CompositorState,
         xdg_shell_state: XdgShellState,
@@ -108,47 +156,82 @@ impl MitosGuiState {
         home_screen: HomeScreenConfig,
         top_bar_panel: Option<GlassPanel>,
     ) -> Self {
+        // ------------------------------------------------------------
+        // Desktop space
+        //
+        // The output starts at logical coordinate (0, 0).
+        // Client windows will later be mapped into this space.
+        // ------------------------------------------------------------
+
         let mut space = Space::default();
+
         space.map_output(&output, (0, 0));
 
+        // ------------------------------------------------------------
+        // Global state
+        // ------------------------------------------------------------
+
         Self {
+            // Wayland
             compositor_state,
             xdg_shell_state,
             shm_state,
+
+            // Input
             seat_state,
             seat,
+
+            // MITOS shell
+            shell: MitosShell::new(),
+
+            // Output
             output,
+
+            // Desktop
             home_screen,
             space,
-            top_bar_panel,
             popups: PopupManager::default(),
+
+            // Pointer / timing
             pointer_location: (0.0, 0.0).into(),
             clock: Clock::new(),
-            shell: MitosShell::new(),
+
+            // Renderer-facing shell geometry
+            top_bar_panel,
         }
     }
 }
+
+// ============================================================================
+// SEAT HANDLER
+// ============================================================================
 
 impl SeatHandler for MitosGuiState {
     type KeyboardFocus = WlSurface;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
+    /// Return the compositor's seat state.
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
     }
 
+    /// Called whenever keyboard/pointer focus changes.
     fn focus_changed(
         &mut self,
         _seat: &Seat<Self>,
         _focused: Option<&WlSurface>,
     ) {
+        // Window focus handling will be implemented during
+        // the Stage 4 window-manager work.
     }
 
+    /// Called when a client changes its cursor image.
     fn cursor_image(
         &mut self,
         _seat: &Seat<Self>,
         _image: CursorImageStatus,
     ) {
+        // MITOS cursor rendering will be implemented later.
     }
 }
