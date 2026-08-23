@@ -1,5 +1,6 @@
 //! Global state for the MITOS compositor.
 use crate::renderer::GlassPanel;
+use crate::renderer::MitosShell;
 
 use smithay::{
     desktop::{PopupManager, Space, Window},
@@ -27,9 +28,30 @@ pub struct MitosGuiState {
     pub shm_state: ShmState,
     pub seat_state: SeatState<Self>,
     pub seat: Seat<Self>,
+    pub shell: MitosShell,
     pub output: Output,
     
+    
 
+
+    
+pub struct MitosShell {
+    pub top_bar: Option<GlassPanel>,
+
+    pub launcher: Option<GlassPanel>,
+
+    pub dock: Option<GlassPanel>,
+}
+
+impl MitosShell {
+    pub fn new() -> Self {
+        Self {
+            top_bar: None,
+            launcher: None,
+            dock: None,
+        }
+    }
+}
     // --------------------------------------------------------
     // Home screen (Stage 3)
     //
@@ -99,6 +121,7 @@ impl MitosGuiState {
             popups: PopupManager::default(),
             pointer_location: (0.0, 0.0).into(),
             clock: Clock::new(),
+            shell: MitosShell::new(),
         }
     }
 }
