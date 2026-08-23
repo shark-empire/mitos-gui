@@ -411,16 +411,5 @@ if state.home_screen.top_bar {
 
     Ok(())
 }
-pub fn background_color(
-    home_screen: &HomeScreenConfig,
-) -> Color32F {
-    let c = home_screen.background;
 
-    Color32F::new(
-        c.r,
-        c.g,
-        c.b,
-        c.a,
-    )
-}
 
