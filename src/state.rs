@@ -41,15 +41,18 @@ pub struct MitosShell {
     pub launcher: Option<GlassPanel>,
 
     pub dock: Option<GlassPanel>,
+
+    pub launcher_visible: bool,
 }
 
 impl MitosShell {
     pub fn new() -> Self {
-        Self {
-            top_bar: None,
-            launcher: None,
-            dock: None,
-        }
+  Self {
+    top_bar: None,
+    launcher: None,
+    dock: None,
+    launcher_visible: false,
+     }
     }
 }
     // --------------------------------------------------------
