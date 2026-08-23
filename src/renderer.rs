@@ -39,12 +39,37 @@ pub struct GlassPanel {
 }
 
 impl GlassPanel {
-    /// Creates the standard MITOS top bar.
     pub fn top_bar(width: i32, height: i32) -> Self {
         let border = MitosTheme::BORDER;
 
         Self {
             position: (0, 0),
+            size: (width, height),
+            radius: MitosTheme::PANEL_RADIUS,
+            tint: glass_color(),
+            border: Color32F::new(
+                border.r,
+                border.g,
+                border.b,
+                border.a,
+            ),
+        }
+    }
+
+    pub fn launcher(
+        screen_width: i32,
+        screen_height: i32,
+    ) -> Self {
+        let width = 720;
+        let height = 480;
+
+        let x = (screen_width - width) / 2;
+        let y = (screen_height - height) / 2;
+
+        let border = MitosTheme::BORDER;
+
+        Self {
+            position: (x, y),
             size: (width, height),
             radius: MitosTheme::PANEL_RADIUS,
             tint: glass_color(),
