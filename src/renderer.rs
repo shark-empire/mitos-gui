@@ -369,6 +369,64 @@ pub fn collect_top_bar_elements(
 
     elements
 }
+
+pub fn collect_launcher_elements(
+    panel: &GlassPanel,
+    glass_panel: &mut PixelShaderElement,
+    shadow_buffer: &SolidColorBuffer,
+    highlight_buffer: &SolidColorBuffer,
+    border_buffer: &SolidColorBuffer,
+    renderer: &mut GlesRenderer,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+
+    let (x, y) = panel.position;
+    let (width, height) = panel.size;
+
+    glass_panel.resize(
+        Rectangle::new(
+            (x, y).into(),
+            (width, height).into(),
+        ),
+        None,
+    );
+
+    elements.push(
+        ChromeRenderElement::Glass(
+            glass_panel.clone()
+        )
+    );
+
+    elements.extend(
+        shadow_buffer.render_elements(
+            renderer,
+            (x, y + height).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    elements.extend(
+        highlight_buffer.render_elements(
+            renderer,
+            (x, y).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    elements.extend(
+        border_buffer.render_elements(
+            renderer,
+            (x, y + height - 1).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    elements
+}
 /// Collect render elements for one frame.
 ///
 /// The MITOS shell is placed first, followed by client windows.
