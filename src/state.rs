@@ -141,21 +141,20 @@ pub struct MitosGuiState {
     /// This is kept separately while the Stage 3 renderer is being built.
     /// Eventually the complete shell geometry can be managed through
     /// `MitosShell`.
-    pub top_bar_panel: Option<GlassPanel>,
+    
 }
 
 impl MitosGuiState {
     /// Create the initial MITOS compositor state.
-    pub fn new(
-        compositor_state: CompositorState,
-        xdg_shell_state: XdgShellState,
-        shm_state: ShmState,
-        seat_state: SeatState<Self>,
-        seat: Seat<Self>,
-        output: Output,
-        home_screen: HomeScreenConfig,
-        top_bar_panel: Option<GlassPanel>,
-    ) -> Self {
+  pub fn new(
+    compositor_state: CompositorState,
+    xdg_shell_state: XdgShellState,
+    shm_state: ShmState,
+    seat_state: SeatState<Self>,
+    seat: Seat<Self>,
+    output: Output,
+    home_screen: HomeScreenConfig,
+) -> Self {
         // ------------------------------------------------------------
         // Desktop space
         //
@@ -196,8 +195,7 @@ impl MitosGuiState {
             pointer_location: (0.0, 0.0).into(),
             clock: Clock::new(),
 
-            // Renderer-facing shell geometry
-            top_bar_panel,
+            
         }
     }
 }
