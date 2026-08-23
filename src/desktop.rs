@@ -15,10 +15,14 @@
 use std::fs;
 use std::path::PathBuf;
 
+use smithay::{
+    backend::renderer::Color32F,
+    utils::Size,
+};
+
 use crate::renderer::GlassPanel;
 use crate::theme::{Color, MitosTheme};
 
-use smithay::utils::Size;
 
 // ============================================================================
 // HOME SCREEN CONFIGURATION
@@ -325,7 +329,12 @@ impl ShellLayout {
                 size: (launcher_width, launcher_height),
                 radius: MitosTheme::PANEL_RADIUS,
                 tint: crate::renderer::glass_color(),
-                border: Color32F::from_theme(MitosTheme::BORDER),
+                border: Color32F::new(
+                   MitosTheme::BORDER.r,
+                   MitosTheme::BORDER.g,
+                   MitosTheme::BORDER.b,
+                   MitosTheme::BORDER.a,
+                        ),
             })
         } else {
             None
@@ -354,12 +363,17 @@ impl ShellLayout {
             let y = (height - dock_height - 20).max(0);
 
             Some(GlassPanel {
-                position: (x, y),
-                size: (dock_width, dock_height),
-                radius: MitosTheme::PANEL_RADIUS,
-                tint: crate::renderer::glass_color(),
-                border: Color32F::from_theme(MitosTheme::BORDER),
-            })
+    position: (x, y),
+    size: (dock_width, dock_height),
+    radius: MitosTheme::PANEL_RADIUS,
+    tint: crate::renderer::glass_color(),
+    border: Color32F::new(
+        MitosTheme::BORDER.r,
+        MitosTheme::BORDER.g,
+        MitosTheme::BORDER.b,
+        MitosTheme::BORDER.a,
+    ),
+})
         } else {
             None
         };
@@ -372,25 +386,7 @@ impl ShellLayout {
     }
 }
 
-// ============================================================================
-// COLOR HELPERS
-// ============================================================================
 
-/// Convert a theme color into the renderer's Color32F representation.
-trait Color32FExt {
-    fn from_theme(color: Color) -> smithay::backend::renderer::Color32F;
-}
-
-impl Color32FExt for smithay::backend::renderer::Color32F {
-    fn from_theme(color: Color) -> smithay::backend::renderer::Color32F {
-        smithay::backend::renderer::Color32F::new(
-            color.r,
-            color.g,
-            color.b,
-            color.a,
-        )
-    }
-}
 
 // ============================================================================
 // CONFIGURATION PATH
