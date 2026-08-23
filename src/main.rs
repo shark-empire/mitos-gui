@@ -317,15 +317,15 @@ if state.home_screen.top_bar {
             ),
         );
 
-        state.top_bar_panel = Some(
-            renderer::GlassPanel::top_bar(
-                width,
-                height,
-            ),
-        );
+        state.shell.top_bar = Some(
+           renderer::GlassPanel::top_bar(
+             width,
+             height,
+             ),
+         );
     }
 } else {
-    state.top_bar_panel = None;
+    state.shell.top_bar = None;
 }
 
 
