@@ -21,7 +21,7 @@ use smithay::backend::renderer::damage::{
 use smithay::backend::renderer::element::solid::SolidColorBuffer;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::ImportMemWl;
-use smithay::backend::renderer::winit::{self, WinitEvent};
+use smithay::backend::winit::{self, WinitEvent};
 use smithay::backend::SwapBuffersError;
 
 use smithay::input::keyboard::XkbConfig;
