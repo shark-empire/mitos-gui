@@ -1,60 +1,88 @@
-//! The MITOS home screen: wallpaper and shell chrome.
+//! MITOS desktop and shell layout.
 //!
-//! Stage 3 started here with the one thing every real desktop lets you
-//! change without a rebuild: what the empty desktop looks like. The
-//! top bar builds on the same `HomeScreenConfig` -- `top_bar` and
-//! `top_bar_height` control whether it's drawn and how tall it is.
-//! Its glass tint isn't configurable yet (see `renderer::top_bar_color`);
-//! neither are the glass panels window chrome will eventually use.
+//! This module owns the logical desktop configuration and shell geometry.
 //!
-//! Config lives at `$XDG_CONFIG_HOME/mitos/home.conf` (falling back to
-//! `~/.config/mitos/home.conf`), in plain `key = value` lines:
+//! Stage 3 responsibilities:
+//! - desktop background configuration
+//! - top-bar configuration
+//! - launcher configuration
+//! - dock configuration
+//! - logical shell layout
 //!
-//! ```text
-//! # ~/.config/mitos/home.conf
-//! background = #0a1420
-//! top_bar = true
-//! top_bar_height = 32
-//! ```
-//!
-//! A missing file, a missing `$HOME`, or a line MITOS doesn't
-//! understand all fall back to the built-in theme default rather than
-//! failing startup -- a broken config should never be the reason the
-//! compositor won't come up.
+//! Rendering remains in `renderer.rs`.
+//! This module deliberately does not contain GLES/OpenGL code.
 
 use std::fs;
 use std::path::PathBuf;
 
+use crate::renderer::GlassPanel;
 use crate::theme::{Color, MitosTheme};
 
+use smithay::utils::Size;
+
+// ============================================================================
+// HOME SCREEN CONFIGURATION
+// ============================================================================
+
+/// Configuration for the MITOS home screen.
 #[derive(Clone, Copy, Debug)]
 pub struct HomeScreenConfig {
+    /// Desktop background color.
     pub background: Color,
 
-    // Whether the top bar is drawn at all, and how tall it is in
-    // logical pixels. Its color isn't here -- see `renderer::top_bar_color`.
+    /// Whether the top bar is visible.
     pub top_bar: bool,
+
+    /// Top bar height in logical pixels.
     pub top_bar_height: f32,
+
+    /// Whether the launcher is available.
+    pub launcher: bool,
+
+    /// Whether the dock is visible.
+    pub dock: bool,
+
+    /// Dock height in logical pixels.
+    pub dock_height: f32,
+
+    /// Launcher width in logical pixels.
+    pub launcher_width: f32,
+
+    /// Launcher height in logical pixels.
+    pub launcher_height: f32,
 }
 
 impl Default for HomeScreenConfig {
     fn default() -> Self {
         Self {
             background: MitosTheme::BACKGROUND,
+
             top_bar: true,
             top_bar_height: MitosTheme::TOP_BAR_HEIGHT,
+
+            launcher: true,
+
+            dock: true,
+            dock_height: 72.0,
+
+            launcher_width: 720.0,
+            launcher_height: 520.0,
         }
     }
 }
 
 impl HomeScreenConfig {
-    /// Loads the home screen config from disk, falling back to
-    /// [`MitosTheme`] defaults for anything missing or unreadable.
+    /// Load the MITOS home-screen configuration.
+    ///
+    /// Missing or malformed configuration never prevents MITOS from
+    /// starting. Invalid values simply retain their defaults.
     pub fn load() -> Self {
         let mut config = Self::default();
 
         let Some(path) = config_path() else {
-            println!("MITOS GUI: no $HOME, using default home screen config");
+            println!(
+                "MITOS GUI: no $HOME, using default home screen config"
+            );
             return config;
         };
 
@@ -79,6 +107,7 @@ impl HomeScreenConfig {
                     path.display(),
                     line_no + 1,
                 );
+
                 continue;
             };
 
@@ -86,30 +115,122 @@ impl HomeScreenConfig {
             let value = value.trim();
 
             match key {
+                // --------------------------------------------------------
+                // Background
+                // --------------------------------------------------------
+
                 "background" => match parse_hex_color(value) {
                     Some(color) => config.background = color,
+
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: invalid color {value:?}, keeping default",
                         path.display(),
                         line_no + 1,
                     ),
                 },
+
+                // --------------------------------------------------------
+                // Top bar
+                // --------------------------------------------------------
+
                 "top_bar" => match parse_bool(value) {
                     Some(enabled) => config.top_bar = enabled,
+
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: expected `true` or `false`, got {value:?}, keeping default",
                         path.display(),
                         line_no + 1,
                     ),
                 },
-                "top_bar_height" => match value.parse::<f32>() {
-                    Ok(height) if height > 0.0 => config.top_bar_height = height,
-                    _ => tracing::warn!(
-                        "MITOS GUI: {}:{}: invalid top bar height {value:?}, keeping default",
+
+                "top_bar_height" => {
+                    match parse_positive_f32(value) {
+                        Some(height) => {
+                            config.top_bar_height = height;
+                        }
+
+                        None => tracing::warn!(
+                            "MITOS GUI: {}:{}: invalid top bar height {value:?}, keeping default",
+                            path.display(),
+                            line_no + 1,
+                        ),
+                    }
+                }
+
+                // --------------------------------------------------------
+                // Launcher
+                // --------------------------------------------------------
+
+                "launcher" => match parse_bool(value) {
+                    Some(enabled) => config.launcher = enabled,
+
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false`, got {value:?}, keeping default",
                         path.display(),
                         line_no + 1,
                     ),
                 },
+
+                "launcher_width" => {
+                    match parse_positive_f32(value) {
+                        Some(width) => {
+                            config.launcher_width = width;
+                        }
+
+                        None => tracing::warn!(
+                            "MITOS GUI: {}:{}: invalid launcher width {value:?}, keeping default",
+                            path.display(),
+                            line_no + 1,
+                        ),
+                    }
+                }
+
+                "launcher_height" => {
+                    match parse_positive_f32(value) {
+                        Some(height) => {
+                            config.launcher_height = height;
+                        }
+
+                        None => tracing::warn!(
+                            "MITOS GUI: {}:{}: invalid launcher height {value:?}, keeping default",
+                            path.display(),
+                            line_no + 1,
+                        ),
+                    }
+                }
+
+                // --------------------------------------------------------
+                // Dock
+                // --------------------------------------------------------
+
+                "dock" => match parse_bool(value) {
+                    Some(enabled) => config.dock = enabled,
+
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false`, got {value:?}, keeping default",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "dock_height" => {
+                    match parse_positive_f32(value) {
+                        Some(height) => {
+                            config.dock_height = height;
+                        }
+
+                        None => tracing::warn!(
+                            "MITOS GUI: {}:{}: invalid dock height {value:?}, keeping default",
+                            path.display(),
+                            line_no + 1,
+                        ),
+                    }
+                }
+
+                // --------------------------------------------------------
+                // Unknown
+                // --------------------------------------------------------
+
                 other => tracing::warn!(
                     "MITOS GUI: {}:{}: unknown key {other:?}, ignoring",
                     path.display(),
@@ -127,22 +248,186 @@ impl HomeScreenConfig {
     }
 }
 
-/// Resolves the home screen config path: `$XDG_CONFIG_HOME/mitos/home.conf`,
-/// falling back to `$HOME/.config/mitos/home.conf`.
+// ============================================================================
+// SHELL LAYOUT
+// ============================================================================
+
+/// Logical geometry of the MITOS shell.
+///
+/// This is deliberately independent from GLES.
+///
+/// `desktop.rs` calculates the geometry.
+/// `renderer.rs` renders it.
+#[derive(Clone, Copy, Debug)]
+pub struct ShellLayout {
+    /// Top bar panel.
+    pub top_bar: Option<GlassPanel>,
+
+    /// Application launcher panel.
+    pub launcher: Option<GlassPanel>,
+
+    /// Bottom dock panel.
+    pub dock: Option<GlassPanel>,
+}
+
+impl ShellLayout {
+    /// Calculate the shell layout for the current output.
+    pub fn calculate(
+        config: &HomeScreenConfig,
+        output_size: Size<i32, smithay::utils::Logical>,
+    ) -> Self {
+        let width = output_size.w.max(1);
+        let height = output_size.h.max(1);
+
+        // ------------------------------------------------------------
+        // Top bar
+        // ------------------------------------------------------------
+
+        let top_bar = if config.top_bar {
+            let top_bar_height = config
+                .top_bar_height
+                .max(1.0)
+                .round() as i32;
+
+            Some(GlassPanel::top_bar(
+                width,
+                top_bar_height,
+            ))
+        } else {
+            None
+        };
+
+        // ------------------------------------------------------------
+        // Launcher
+        //
+        // Centered horizontally and vertically.
+        // ------------------------------------------------------------
+
+        let launcher = if config.launcher {
+            let launcher_width = config
+                .launcher_width
+                .min(width as f32)
+                .max(1.0)
+                .round() as i32;
+
+            let launcher_height = config
+                .launcher_height
+                .min(height as f32)
+                .max(1.0)
+                .round() as i32;
+
+            let x = ((width - launcher_width) / 2).max(0);
+
+            let y = ((height - launcher_height) / 2).max(0);
+
+            Some(GlassPanel {
+                position: (x, y),
+                size: (launcher_width, launcher_height),
+                radius: MitosTheme::PANEL_RADIUS,
+                tint: crate::renderer::glass_color(),
+                border: Color32F::from_theme(MitosTheme::BORDER),
+            })
+        } else {
+            None
+        };
+
+        // ------------------------------------------------------------
+        // Dock
+        //
+        // Centered horizontally at the bottom of the screen.
+        // ------------------------------------------------------------
+
+        let dock = if config.dock {
+            let dock_height = config
+                .dock_height
+                .max(1.0)
+                .min(height as f32)
+                .round() as i32;
+
+            let dock_width = ((width as f32) * 0.55)
+                .max(320.0)
+                .min(width as f32)
+                .round() as i32;
+
+            let x = ((width - dock_width) / 2).max(0);
+
+            let y = (height - dock_height - 20).max(0);
+
+            Some(GlassPanel {
+                position: (x, y),
+                size: (dock_width, dock_height),
+                radius: MitosTheme::PANEL_RADIUS,
+                tint: crate::renderer::glass_color(),
+                border: Color32F::from_theme(MitosTheme::BORDER),
+            })
+        } else {
+            None
+        };
+
+        Self {
+            top_bar,
+            launcher,
+            dock,
+        }
+    }
+}
+
+// ============================================================================
+// COLOR HELPERS
+// ============================================================================
+
+/// Convert a theme color into the renderer's Color32F representation.
+trait Color32FExt {
+    fn from_theme(color: Color) -> smithay::backend::renderer::Color32F;
+}
+
+impl Color32FExt for smithay::backend::renderer::Color32F {
+    fn from_theme(color: Color) -> smithay::backend::renderer::Color32F {
+        smithay::backend::renderer::Color32F::new(
+            color.r,
+            color.g,
+            color.b,
+            color.a,
+        )
+    }
+}
+
+// ============================================================================
+// CONFIGURATION PATH
+// ============================================================================
+
+/// Resolve the MITOS home configuration path.
+///
+/// Priority:
+///
+/// 1. `$XDG_CONFIG_HOME/mitos/home.conf`
+/// 2. `$HOME/.config/mitos/home.conf`
 fn config_path() -> Option<PathBuf> {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
-            return Some(PathBuf::from(xdg).join("mitos/home.conf"));
+            return Some(
+                PathBuf::from(xdg)
+                    .join("mitos")
+                    .join("home.conf"),
+            );
         }
     }
 
     std::env::var("HOME")
         .ok()
-        .map(|home| PathBuf::from(home).join(".config/mitos/home.conf"))
+        .map(|home| {
+            PathBuf::from(home)
+                .join(".config")
+                .join("mitos")
+                .join("home.conf")
+        })
 }
 
-/// Parses `true` or `false` exactly -- no `1`/`0`/`yes`/`no` aliases,
-/// to keep this (and its error messages) predictable.
+// ============================================================================
+// PARSERS
+// ============================================================================
+
+/// Parse `true` or `false`.
 fn parse_bool(value: &str) -> Option<bool> {
     match value {
         "true" => Some(true),
@@ -151,44 +436,67 @@ fn parse_bool(value: &str) -> Option<bool> {
     }
 }
 
-/// Parses `#RGB`, `#RRGGBB`, or `#RRGGBBAA` into a [`Color`].
+/// Parse a positive floating-point value.
+fn parse_positive_f32(value: &str) -> Option<f32> {
+    let number = value.parse::<f32>().ok()?;
+
+    if number.is_finite() && number > 0.0 {
+        Some(number)
+    } else {
+        None
+    }
+}
+
+/// Parse `#RGB`, `#RRGGBB`, or `#RRGGBBAA`.
 ///
-/// Alpha defaults to fully opaque when not specified.
+/// Alpha defaults to fully opaque when omitted.
 fn parse_hex_color(value: &str) -> Option<Color> {
     let hex = value.strip_prefix('#')?;
 
-    // Reject non-ASCII up front so every byte index below lands on a
-    // char boundary -- otherwise a stray multibyte character in a
-    // malformed config value could panic the slicing below instead of
-    // just failing to parse.
     if !hex.is_ascii() {
         return None;
     }
 
     let expand = |byte: u8| -> Option<u8> {
-        let d = (byte as char).to_digit(16)? as u8;
-        Some(d * 16 + d)
+        let digit = (byte as char).to_digit(16)? as u8;
+
+        Some(digit * 16 + digit)
     };
 
-    let channel = |s: &str| -> Option<u8> { u8::from_str_radix(s, 16).ok() };
+    let channel =
+        |value: &str| -> Option<u8> {
+            u8::from_str_radix(value, 16).ok()
+        };
 
     let (r, g, b, a) = match hex.len() {
+        // #RGB
         3 => {
             let bytes = hex.as_bytes();
-            (expand(bytes[0])?, expand(bytes[1])?, expand(bytes[2])?, 255)
+
+            (
+                expand(bytes[0])?,
+                expand(bytes[1])?,
+                expand(bytes[2])?,
+                255,
+            )
         }
+
+        // #RRGGBB
         6 => (
             channel(&hex[0..2])?,
             channel(&hex[2..4])?,
             channel(&hex[4..6])?,
             255,
         ),
+
+        // #RRGGBBAA
         8 => (
             channel(&hex[0..2])?,
             channel(&hex[2..4])?,
             channel(&hex[4..6])?,
             channel(&hex[6..8])?,
         ),
+
         _ => return None,
     };
 
@@ -200,29 +508,39 @@ fn parse_hex_color(value: &str) -> Option<Color> {
     ))
 }
 
+// ============================================================================
+// TESTS
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parses_shorthand_hex() {
-        let c = parse_hex_color("#0a1420").unwrap();
-        assert!((c.r - 10.0 / 255.0).abs() < f32::EPSILON);
-        assert!((c.a - 1.0).abs() < f32::EPSILON);
+    fn parses_three_digit_hex() {
+        let color = parse_hex_color("#0af").unwrap();
+
+        assert!((color.r - 0.0).abs() < f32::EPSILON);
+        assert!((color.g - 170.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.b - 255.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.a - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn parses_three_digit_hex() {
-        let c = parse_hex_color("#0af").unwrap();
-        assert!((c.r - 0x00 as f32 / 255.0).abs() < f32::EPSILON);
-        assert!((c.g - 0xaa as f32 / 255.0).abs() < f32::EPSILON);
-        assert!((c.b - 0xff as f32 / 255.0).abs() < f32::EPSILON);
+    fn parses_six_digit_hex() {
+        let color = parse_hex_color("#0a1420").unwrap();
+
+        assert!((color.r - 10.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.g - 20.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.b - 32.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.a - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn parses_alpha_channel() {
-        let c = parse_hex_color("#0a142080").unwrap();
-        assert!((c.a - 0x80 as f32 / 255.0).abs() < f32::EPSILON);
+        let color = parse_hex_color("#0a142080").unwrap();
+
+        assert!((color.a - 128.0 / 255.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -239,5 +557,13 @@ mod tests {
         assert_eq!(parse_bool("false"), Some(false));
         assert_eq!(parse_bool("yes"), None);
         assert_eq!(parse_bool("1"), None);
+    }
+
+    #[test]
+    fn parses_positive_number() {
+        assert_eq!(parse_positive_f32("32"), Some(32.0));
+        assert_eq!(parse_positive_f32("72.5"), Some(72.5));
+        assert_eq!(parse_positive_f32("0"), None);
+        assert_eq!(parse_positive_f32("-1"), None);
     }
 }
