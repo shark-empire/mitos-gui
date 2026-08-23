@@ -14,21 +14,36 @@ use std::time::Duration;
 
 use calloop::EventLoop;
 
-use smithay::backend::renderer::damage::{Error as DamageTrackerError, OutputDamageTracker};
+use smithay::backend::renderer::damage::{
+    Error as DamageTrackerError,
+    OutputDamageTracker,
+};
 use smithay::backend::renderer::element::solid::SolidColorBuffer;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::ImportMemWl;
-use smithay::backend::winit::{self, WinitEvent};
+use smithay::backend::renderer::winit::{self, WinitEvent};
 use smithay::backend::SwapBuffersError;
 
 use smithay::input::keyboard::XkbConfig;
 use smithay::input::SeatState;
 
-use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
-use smithay::utils::{Scale, Transform};
+use smithay::output::{
+    Mode,
+    Output,
+    PhysicalProperties,
+    Subpixel,
+};
 
-use smithay::reexports::wayland_server::Display;
-use smithay::reexports::wayland_server::ListeningSocket;
+use smithay::utils::{
+    Scale,
+    Transform,
+};
+
+use smithay::reexports::wayland_server::{
+    Display,
+    ListeningSocket,
+};
+
 use smithay::reexports::winit::platform::pump_events::PumpStatus;
 
 use smithay::wayland::{
@@ -48,12 +63,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::fmt::init();
 
-    let mut event_loop: EventLoop<MitosGuiState> = EventLoop::try_new()?;
+    let mut event_loop: EventLoop<MitosGuiState> =
+        EventLoop::try_new()?;
 
-    let mut display: Display<MitosGuiState> = Display::new()?;
+    let mut display: Display<MitosGuiState> =
+        Display::new()?;
 
-    let listening_socket = ListeningSocket::bind_auto("wayland", 0..10)
-        .expect("Failed to create Wayland listening socket");
+    let listening_socket =
+        ListeningSocket::bind_auto("wayland", 0..10)
+            .expect("Failed to create Wayland listening socket");
 
     println!(
         "MITOS GUI: Wayland socket created at {:?}",
@@ -62,51 +80,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let display_handle = display.handle();
 
-    // --------------------------------------------------------
-    // GPU backend
-    //
-    // winit stands in for real display hardware until Stage 5 wires up
-    // DRM/GBM: it hands us a real GLES context plus a host window to
-    // present into, and doubles as our input source (forwarding host
-    // keyboard/mouse events) in the meantime. Nothing downstream of
-    // this call -- the renderer, the damage tracker, input.rs -- knows
-    // or cares that it isn't real hardware yet.
-    // --------------------------------------------------------
+    // ============================================================
+    // GPU BACKEND
+    // ============================================================
 
-    let (mut backend, mut winit_event_loop) = winit::init::<GlesRenderer>()?;
+    let (mut backend, mut winit_event_loop) =
+        winit::init::<GlesRenderer>()?;
 
-    println!("MITOS GUI: GLES renderer initialized (winit backend)");
+    println!(
+        "MITOS GUI: GLES renderer initialized (winit backend)"
+    );
 
-    // --------------------------------------------------------
-    // Wayland compositor
-    // --------------------------------------------------------
+    // ============================================================
+    // WAYLAND COMPOSITOR
+    // ============================================================
 
-    let compositor_state = CompositorState::new::<MitosGuiState>(&display_handle);
+    let compositor_state =
+        CompositorState::new::<MitosGuiState>(&display_handle);
 
-    // --------------------------------------------------------
-    // Shared memory buffers
-    //
-    // Seeded with whatever pixel formats the GLES renderer actually
-    // supports, on top of the ARGB8888/XRGB8888 pair `ShmState::new`
-    // always advertises regardless.
-    // --------------------------------------------------------
+    // ============================================================
+    // SHM
+    // ============================================================
 
-    let mut shm_state = ShmState::new::<MitosGuiState>(&display_handle, vec![]);
-    shm_state.update_formats(backend.renderer().shm_formats());
+    let mut shm_state =
+        ShmState::new::<MitosGuiState>(
+            &display_handle,
+            vec![],
+        );
 
-    // --------------------------------------------------------
-    // XDG shell
-    // --------------------------------------------------------
+    shm_state.update_formats(
+        backend.renderer().shm_formats()
+    );
 
-    let xdg_shell_state = XdgShellState::new::<MitosGuiState>(&display_handle);
+    // ============================================================
+    // XDG SHELL
+    // ============================================================
 
-    // --------------------------------------------------------
-    // Output
-    //
-    // Sized to match whatever window winit actually opened, rather
-    // than a hardcoded 1920x1080 — Stage 5's real DRM output will
-    // report its own mode the same way, through the same `Output`.
-    // --------------------------------------------------------
+    let xdg_shell_state =
+        XdgShellState::new::<MitosGuiState>(
+            &display_handle
+        );
+
+    // ============================================================
+    // OUTPUT
+    // ============================================================
 
     let output = Output::new(
         OUTPUT_NAME.to_string(),
@@ -118,17 +135,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    let _output_global = output.create_global::<MitosGuiState>(&display_handle);
+    let _output_global =
+        output.create_global::<MitosGuiState>(
+            &display_handle
+        );
 
     let mode = Mode {
         size: backend.window_size(),
         refresh: 60_000,
     };
 
-    // GLES renders into a framebuffer that's vertically flipped
-    // relative to winit's window; telling the output it's
-    // `Flipped180` keeps the coordinate space damage tracking works in
-    // consistent with what winit actually presents on screen.
     output.change_current_state(
         Some(mode),
         Some(Transform::Flipped180),
@@ -140,33 +156,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "MITOS GUI: output {OUTPUT_NAME} registered ({}x{}@60)",
-        mode.size.w, mode.size.h
+        mode.size.w,
+        mode.size.h
     );
 
-    // --------------------------------------------------------
-    // Seat (keyboard + pointer capabilities)
-    // --------------------------------------------------------
+    // ============================================================
+    // SEAT
+    // ============================================================
 
-    let mut seat_state = SeatState::<MitosGuiState>::new();
-    let mut seat = seat_state.new_wl_seat(&display_handle, "seat-0");
+    let mut seat_state =
+        SeatState::<MitosGuiState>::new();
 
-    seat.add_keyboard(XkbConfig::default(), 200, 25)?;
+    let mut seat =
+        seat_state.new_wl_seat(
+            &display_handle,
+            "seat-0",
+        );
+
+    seat.add_keyboard(
+        XkbConfig::default(),
+        200,
+        25,
+    )?;
+
     seat.add_pointer();
 
-    println!("MITOS GUI: seat-0 registered (keyboard + pointer)");
+    println!(
+        "MITOS GUI: seat-0 registered (keyboard + pointer)"
+    );
 
-    // --------------------------------------------------------
-    // Home screen configuration (Stage 3)
-    //
-    // Loaded once, up front -- clear_color() reads the resolved
-    // struct every frame, not the config file.
-    // --------------------------------------------------------
+    // ============================================================
+    // HOME SCREEN
+    // ============================================================
 
-    let home_screen = desktop::HomeScreenConfig::load();
+    let home_screen =
+        desktop::HomeScreenConfig::load();
 
-    // --------------------------------------------------------
-    // MITOS state
-    // --------------------------------------------------------
+    // ============================================================
+    // MITOS STATE
+    // ============================================================
 
     let mut state = MitosGuiState::new(
         compositor_state,
@@ -179,93 +207,192 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
     );
 
-    // Damage tracking: rebuilt from scratch on resize (see the
-    // `WinitEvent::Resized` arm below), since a resized output
-    // invalidates whatever damage state was tracked against its old
-    // dimensions.
-    let mut damage_tracker = OutputDamageTracker::from_output(&output);
+    // ============================================================
+    // INITIAL SHELL LAYOUT
+    //
+    // Stage 3:
+    //
+    // HomeScreenConfig
+    //        ↓
+    // ShellLayout::calculate()
+    //        ↓
+    // MitosShell
+    // ============================================================
 
-    // The top bar's pixels, persisted across frames rather than
-    // rebuilt each time -- `SolidColorBuffer::update` no-ops when the
-    // size and color haven't changed, so a motionless bar costs the
-    // damage tracker nothing after the frame it first appears in.
-    // Real size follows below, once `state.space` knows the output's
-    // logical geometry; (0, 0) here just avoids a second Option layer
-    // before that first update runs.
+    if let Some(output_geometry) =
+        state.space.output_geometry(&output)
+    {
+        let layout =
+            desktop::ShellLayout::calculate(
+                &state.home_screen,
+                output_geometry.size,
+            );
 
-let mut top_bar_shadow_buffer =
-    SolidColorBuffer::new((0, 0), renderer::shadow_color());
+        state.shell.top_bar = layout.top_bar;
+        state.shell.launcher = layout.launcher;
+        state.shell.dock = layout.dock;
 
-let mut top_bar_highlight_buffer =
-    SolidColorBuffer::new((0, 0), renderer::glass_highlight_color());
+        // Keep the old renderer-facing field synchronized
+        // for the current rendering path.
+        state.top_bar_panel =
+            state.shell.top_bar;
+    }
 
-let mut top_bar_border_buffer =
-    SolidColorBuffer::new((0, 0), {
-        let c = theme::MitosTheme::BORDER;
-        smithay::backend::renderer::Color32F::new(
-            c.r,
-            c.g,
-            c.b,
-            c.a,
-        )
-    });
-    
-let mut glass_panel_element =
-    renderer::create_glass_panel_element(
-        backend.renderer()
-    )?;
-    // Forces a handful of full-framebuffer redraws right after
-    // anything that invalidates the backbuffer's contents wholesale
-    // (startup, resize) instead of trusting possibly-stale damage.
-    let mut full_redraw_frames: u8 = 0;
+    // ============================================================
+    // DAMAGE TRACKING
+    // ============================================================
+
+    let mut damage_tracker =
+        OutputDamageTracker::from_output(&output);
+
+    // ============================================================
+    // TOP BAR GPU BUFFERS
+    // ============================================================
+
+    let mut top_bar_shadow_buffer =
+        SolidColorBuffer::new(
+            (0, 0),
+            renderer::shadow_color(),
+        );
+
+    let mut top_bar_highlight_buffer =
+        SolidColorBuffer::new(
+            (0, 0),
+            renderer::glass_highlight_color(),
+        );
+
+    let mut top_bar_border_buffer =
+        SolidColorBuffer::new(
+            (0, 0),
+            {
+                let c = theme::MitosTheme::BORDER;
+
+                smithay::backend::renderer::Color32F::new(
+                    c.r,
+                    c.g,
+                    c.b,
+                    c.a,
+                )
+            },
+        );
+
+    let mut glass_panel_element =
+        renderer::create_glass_panel_element(
+            backend.renderer()
+        )?;
+
+    // ============================================================
+    // FULL REDRAW
+    // ============================================================
+
+    let mut full_redraw_frames: u8 = 4;
 
     println!("MITOS GUI: compositor initialized");
     println!("MITOS GUI: XDG shell initialized");
     println!("MITOS GUI: shared memory initialized");
     println!("MITOS GUI: window space initialized");
+    println!("MITOS GUI: Stage 3 shell initialized");
     println!("MITOS GUI: event loop running");
 
+    // ============================================================
+    // MAIN LOOP
+    // ============================================================
+
     loop {
-        // --------------------------------------------------------
-        // Input
-        //
-        // winit's pump delivers host keyboard/mouse events plus resize
-        // notifications for the window it owns, non-blocking.
-        // --------------------------------------------------------
+        // ========================================================
+        // INPUT / WINDOW EVENTS
+        // ========================================================
 
-        let pump_status = winit_event_loop.dispatch_new_events(|event| match event {
-            WinitEvent::Resized { size, .. } => {
-                let mode = Mode {
-                    size,
-                    refresh: 60_000,
-                };
-                output.change_current_state(Some(mode), None, None, None);
-                output.set_preferred(mode);
+        let pump_status =
+            winit_event_loop.dispatch_new_events(
+                |event| match event {
+                    WinitEvent::Resized { size, .. } => {
+                        let mode = Mode {
+                            size,
+                            refresh: 60_000,
+                        };
 
-                damage_tracker = OutputDamageTracker::from_output(&output);
-                full_redraw_frames = 4;
-            }
-            WinitEvent::Input(event) => {
-                input::process_input_event(&mut state, &output, event);
-            }
-            _ => {}
-        });
+                        output.change_current_state(
+                            Some(mode),
+                            None,
+                            None,
+                            None,
+                        );
+
+                        output.set_preferred(mode);
+
+                        damage_tracker =
+                            OutputDamageTracker::from_output(
+                                &output
+                            );
+
+                        full_redraw_frames = 4;
+
+                        // ------------------------------------------------
+                        // Recalculate Stage 3 shell geometry.
+                        // ------------------------------------------------
+
+                        if let Some(output_geometry) =
+                            state.space.output_geometry(&output)
+                        {
+                            let layout =
+                                desktop::ShellLayout::calculate(
+                                    &state.home_screen,
+                                    output_geometry.size,
+                                );
+
+                            state.shell.top_bar =
+                                layout.top_bar;
+
+                            state.shell.launcher =
+                                layout.launcher;
+
+                            state.shell.dock =
+                                layout.dock;
+
+                            state.top_bar_panel =
+                                state.shell.top_bar;
+                        }
+                    }
+
+                    WinitEvent::Input(event) => {
+                        input::process_input_event(
+                            &mut state,
+                            &output,
+                            event,
+                        );
+                    }
+
+                    _ => {}
+                },
+            );
 
         if let PumpStatus::Exit(_) = pump_status {
-            println!("MITOS GUI: window closed, shutting down");
+            println!(
+                "MITOS GUI: window closed, shutting down"
+            );
+
             break;
         }
 
-        if let Some(stream) = listening_socket.accept()? {
+        // ========================================================
+        // WAYLAND CLIENT CONNECTION
+        // ========================================================
+
+        if let Some(stream) =
+            listening_socket.accept()?
+        {
             display.handle().insert_client(
                 stream,
-                Arc::new(compositor::MitosClientState::default()),
+                Arc::new(
+                    compositor::MitosClientState::default()
+                ),
             )?;
         }
 
-        // --------------------------------------------------------
-        // Render
-        // --------------------------------------------------------
+        // ========================================================
+        // RENDER
+        // ========================================================
 
         let age = if full_redraw_frames > 0 {
             0
@@ -273,143 +400,178 @@ let mut glass_panel_element =
             backend.buffer_age().unwrap_or(0)
         };
 
-        let scale = Scale::from(output.current_scale().fractional_scale());
+        let scale =
+            Scale::from(
+                output.current_scale().fractional_scale()
+            );
 
-        // Keep the top bar's buffer sized to the output's current
-        // logical width -- `output_geometry` already resolves mode and
-        // scale into logical pixels, so there's no manual physical/scale
-        // math to get wrong here. `update` is a no-op if nothing
-        // actually changed since last frame.
-if state.home_screen.top_bar {
-    if let Some(output_geometry) = state.space.output_geometry(&output) {
-        let width = output_geometry.size.w;
+        // ========================================================
+        // TOP BAR GPU RESOURCES
+        // ========================================================
 
-        let height = state
-            .home_screen
-            .top_bar_height
-            .max(1.0)
-            .round() as i32;
+        if let Some(panel) =
+            state.shell.top_bar
+        {
+            let width = panel.size.0;
+            let height = panel.size.1;
 
+            // Shadow.
+            top_bar_shadow_buffer.update(
+                (width, 8),
+                renderer::shadow_color(),
+            );
 
+            // Highlight.
+            top_bar_highlight_buffer.update(
+                (width, 2),
+                renderer::glass_highlight_color(),
+            );
 
-        // Soft shadow underneath the panel.
-        top_bar_shadow_buffer.update(
-            (width, 8),
-            renderer::shadow_color(),
-        );
+            // Border.
+            let border =
+                theme::MitosTheme::BORDER;
 
-        // Thin glass highlight at the top.
-        top_bar_highlight_buffer.update(
-            (width, 2),
-            renderer::glass_highlight_color(),
-        );
+            top_bar_border_buffer.update(
+                (width, 1),
+                smithay::backend::renderer::Color32F::new(
+                    border.r,
+                    border.g,
+                    border.b,
+                    border.a,
+                ),
+            );
 
-        // Thin bottom border.
-        let border = theme::MitosTheme::BORDER;
+            // Keep renderer-facing panel synchronized.
+            state.top_bar_panel = Some(panel);
 
-        top_bar_border_buffer.update(
-            (width, 1),
-            smithay::backend::renderer::Color32F::new(
-                border.r,
-                border.g,
-                border.b,
-                border.a,
-            ),
-        );
+            let _ = height;
+        } else {
+            state.top_bar_panel = None;
+        }
 
-        state.shell.top_bar = Some(
-           renderer::GlassPanel::top_bar(
-             width,
-             height,
-             ),
-         );
-    }
-} else {
-    state.shell.top_bar = None;
-}
+        // ========================================================
+        // DRAW FRAME
+        // ========================================================
 
+        let render_result =
+            backend.bind().and_then(
+                |(renderer, mut framebuffer)| {
+                    let top_bar_elements =
+                        if let Some(panel) =
+                            state.top_bar_panel.as_ref()
+                        {
+                            renderer::collect_top_bar_elements(
+                                panel,
+                                &mut glass_panel_element,
+                                &top_bar_shadow_buffer,
+                                &top_bar_highlight_buffer,
+                                &top_bar_border_buffer,
+                                renderer,
+                                scale,
+                            )
+                        } else {
+                            Vec::new()
+                        };
 
- let render_result = backend.bind().and_then(|(renderer, mut framebuffer)| {
-    let top_bar_elements = if let Some(panel) = state.top_bar_panel.as_ref() {
-        renderer::collect_top_bar_elements(
-    panel,
-    &mut glass_panel_element,
-    &top_bar_shadow_buffer,
-    &top_bar_highlight_buffer,
-    &top_bar_border_buffer,
-    renderer,
-    scale,
-)
-    } else {
-        Vec::new()
-    };
+                    let elements =
+                        renderer::collect_frame_elements(
+                            renderer,
+                            &state.space,
+                            scale,
+                            top_bar_elements,
+                        );
 
-    let elements = renderer::collect_frame_elements(
-        renderer,
-        &state.space,
-        scale,
-        top_bar_elements,
-    );
+                    damage_tracker
+                        .render_output(
+                            renderer,
+                            &mut framebuffer,
+                            age,
+                            &elements,
+                            renderer::clear_color(
+                                &state.home_screen
+                            ),
+                        )
+                        .map_err(|err| match err {
+                            DamageTrackerError::Rendering(
+                                err
+                            ) => err.into(),
 
-    damage_tracker
-        .render_output(
-            renderer,
-            &mut framebuffer,
-            age,
-            &elements,
-            renderer::clear_color(&state.home_screen),
-        )
-        .map_err(|err| match err {
-            DamageTrackerError::Rendering(err) => err.into(),
-            _ => unreachable!(
-                "output-mode errors can't happen: mode is always set above"
-            ),
-        })
-});
+                            _ => unreachable!(
+                                "output-mode errors can't happen: mode is always set above"
+                            ),
+                        })
+                },
+            );
+
+        // ========================================================
+        // SUBMIT FRAME
+        // ========================================================
 
         match render_result {
             Ok(render_output_result) => {
-                if let Some(damage) = render_output_result.damage {
-                    if let Err(err) = backend.submit(Some(damage)) {
-                        tracing::warn!("MITOS GUI: failed to submit frame: {err}");
+                if let Some(damage) =
+                    render_output_result.damage
+                {
+                    if let Err(err) =
+                        backend.submit(Some(damage))
+                    {
+                        tracing::warn!(
+                            "MITOS GUI: failed to submit frame: {err}"
+                        );
                     }
                 }
 
-                full_redraw_frames = full_redraw_frames.saturating_sub(1);
+                full_redraw_frames =
+                    full_redraw_frames.saturating_sub(1);
 
-                // Frame scheduling: tell every mapped client its last
-                // frame was presented, so well-behaved clients throttle
-                // redraws to this output's refresh rate instead of
-                // rendering in a tight loop.
+                // ------------------------------------------------
+                // Frame callbacks.
+                // ------------------------------------------------
+
                 let now = state.clock.now();
+
                 for window in state.space.elements() {
-                    window.send_frame(&output, now, Some(Duration::from_secs(1)), |_, _| {
-                        Some(output.clone())
-                    });
+                    window.send_frame(
+                        &output,
+                        now,
+                        Some(Duration::from_secs(1)),
+                        |_, _| Some(output.clone()),
+                    );
                 }
             }
-            Err(SwapBuffersError::ContextLost(err)) => {
-                tracing::error!("MITOS GUI: critical rendering error, exiting: {err}");
+
+            Err(
+                SwapBuffersError::ContextLost(err)
+            ) => {
+                tracing::error!(
+                    "MITOS GUI: critical rendering error, exiting: {err}"
+                );
+
                 break;
             }
+
             Err(err) => {
-                tracing::warn!("MITOS GUI: render error: {err}");
+                tracing::warn!(
+                    "MITOS GUI: render error: {err}"
+                );
             }
         }
 
-        // Reconcile output enter/leave state for mapped windows and
-        // drop any popups whose parent surface is gone. Cheap, and
-        // needs to happen before every flush to stay accurate.
+        // ========================================================
+        // MAINTENANCE
+        // ========================================================
+
         state.space.refresh();
         state.popups.cleanup();
 
         display.dispatch_clients(&mut state)?;
         display.flush_clients()?;
 
-        event_loop.dispatch(Duration::from_millis(1), &mut state)?;
+        event_loop.dispatch(
+            Duration::from_millis(1),
+            &mut state,
+        )?;
     }
 
     Ok(())
 }
-
-
