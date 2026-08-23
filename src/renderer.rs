@@ -58,9 +58,14 @@ impl GlassPanel {
     }
 }
 
+// ------------------------------------------------------------
+// MITOS Desktop Background
+// ------------------------------------------------------------
+
 #[derive(Clone, Copy, Debug)]
 pub enum BackgroundMode {
     Solid(Color32F),
+
     Gradient {
         top: Color32F,
         bottom: Color32F,
@@ -89,6 +94,24 @@ impl DesktopBackground {
             ),
         }
     }
+
+    pub fn solid(color: Color32F) -> Self {
+        Self {
+            mode: BackgroundMode::Solid(color),
+        }
+    }
+
+    pub fn gradient(
+        top: Color32F,
+        bottom: Color32F,
+    ) -> Self {
+        Self {
+            mode: BackgroundMode::Gradient {
+                top,
+                bottom,
+            },
+        }
+    }
 }
 
 pub fn background_color(
@@ -104,6 +127,12 @@ pub fn background_color(
     )
 }
 
+pub fn clear_color(
+    home_screen: &HomeScreenConfig,
+) -> Color32F {
+    background_color(home_screen)
+}
+
 render_elements! {
     pub ChromeRenderElement<=GlesRenderer>;
 
@@ -112,14 +141,7 @@ render_elements! {
     SolidColor=SolidColorRenderElement,
 }
 
-/// Color used to clear the framebuffer.
-///
-/// The desktop wallpaper/background comes from `HomeScreenConfig`.
-pub fn clear_color(
-    home_screen: &HomeScreenConfig,
-) -> Color32F {
-    background_color(home_screen)
-}
+
 
 /// Main translucent MITOS glass color.
 pub fn glass_color() -> Color32F {
