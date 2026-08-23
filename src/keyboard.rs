@@ -34,3 +34,10 @@ pub fn handle_keyboard_key<B: InputBackend>(state: &mut MitosGuiState, event: B:
         FilterResult::Forward
     });
 }
+
+
+
+pub fn toggle_launcher(state: &mut MitosGuiState) {
+    state.shell.launcher_visible =
+        !state.shell.launcher_visible;
+}
