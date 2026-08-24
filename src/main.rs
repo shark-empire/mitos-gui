@@ -272,10 +272,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         );
 
-    let mut glass_panel_element =
-        renderer::create_glass_panel_element(
-            backend.renderer()
-        )?;
+    let mut top_bar_glass =
+    renderer::create_glass_panel_element(
+        backend.renderer()
+    )?;
+
+let mut launcher_glass =
+    renderer::create_glass_panel_element(
+        backend.renderer()
+    )?;
+
+let mut dock_glass =
+    renderer::create_glass_panel_element(
+        backend.renderer()
+    )?;
 
     // ============================================================
     // FULL REDRAW
@@ -454,7 +464,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let top_bar_elements = if let Some(panel) = state.shell.top_bar.as_ref() {
                             renderer::collect_top_bar_elements(
                                 panel,
-                                &mut glass_panel_element,
+                                &mut top_bar_glass,
                                 &top_bar_shadow_buffer,
                                 &top_bar_highlight_buffer,
                                 &top_bar_border_buffer,
