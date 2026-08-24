@@ -688,12 +688,19 @@ pub fn collect_dock_elements(
 pub fn collect_shell_elements(
     renderer: &mut GlesRenderer,
     shell: &crate::state::MitosShell,
+
     top_bar_glass: &mut PixelShaderElement,
     launcher_glass: &mut PixelShaderElement,
     dock_glass: &mut PixelShaderElement,
+
     top_bar_shadow: &SolidColorBuffer,
     top_bar_highlight: &SolidColorBuffer,
     top_bar_border: &SolidColorBuffer,
+
+    dock_shadow: &SolidColorBuffer,
+    dock_highlight: &SolidColorBuffer,
+    dock_border: &SolidColorBuffer,
+
     scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
@@ -745,9 +752,9 @@ pub fn collect_shell_elements(
             collect_dock_elements(
                 panel,
                 dock_glass,
-                top_bar_shadow,
-                top_bar_highlight,
-                top_bar_border,
+                dock_shadow,
+                dock_highlight,
+                dock_border,
                 renderer,
                 scale,
             ),
