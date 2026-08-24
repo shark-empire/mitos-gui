@@ -228,22 +228,20 @@ impl Wallpaper {
             );
         }
 
-        let size =
-            Size::<i32, Logical>::from(
-                (width, height)
-            );
+        let buffer_size = (width, height).into();
+
+let logical_size =
+    Size::<i32, Logical>::new(width, height);
 
         let buffer =
             MemoryRenderBuffer::from_slice(
                 rgba.as_raw(),
                 Fourcc::Abgr8888,
-                size,
+                buffer_size,
                 1,
                 Transform::Normal,
                 Some(vec![
-                    Rectangle::from_size(
-                        size
-                    ),
+                    Rectangle::from_size(buffer_size),
                 ]),
             );
 
@@ -255,7 +253,7 @@ impl Wallpaper {
 
         Ok(Self {
             buffer,
-            size,
+            size: logical_size,
         })
     }
 
@@ -332,7 +330,7 @@ impl Wallpaper {
 
         MemoryRenderBufferRenderElement::from_buffer(
             renderer,
-            (0.0, 0.0).into(),
+            (0.0, 0.0),
             &self.buffer,
             Some(1.0),
             Some(src),
