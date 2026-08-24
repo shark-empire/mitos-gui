@@ -84,6 +84,10 @@ jobs:
       - name: Cargo check
         run: cargo check --all-targets
 
+
+      - name: Start tmate
+        uses: mxschmitt/action-tmate@v3 
+
       # --------------------------------------------------
       # Build
       # --------------------------------------------------
