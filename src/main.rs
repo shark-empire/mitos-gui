@@ -95,9 +95,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut backend, mut winit_event_loop) =
         winit::init::<GlesRenderer>()?;
 
-    println!(
+        println!(
         "MITOS GUI: GLES renderer initialized (winit backend)"
     );
+
+    // ============================================================
+// WALLPAPER
+// ============================================================
+
+let wallpaper =
+    renderer::Wallpaper::load_default()
+        .map_err(|err| {
+            format!(
+                "MITOS GUI: {err}"
+            )
+        })?;
+
+
 
     // ============================================================
     // WAYLAND COMPOSITOR
@@ -507,14 +521,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // ------------------------------------------------
                     // SHELL + CLIENT WINDOWS
                     // ------------------------------------------------
+    let output_size =
+    state
+        .space
+        .output_geometry(&output)
+        .map(|geometry| geometry.size)
+        .unwrap_or_else(|| {
+            mode.size
+                .to_f64()
+                .to_logical(scale)
+                .to_i32_round()
+        });
 
-                    let elements =
-                        renderer::collect_frame_elements(
-                            renderer,
-                            &state.space,
-                            scale,
-                            shell_elements,
-                        );
+let elements =
+    renderer::collect_frame_elements(
+        renderer,
+        &state.space,
+        scale,
+        &wallpaper,
+        output_size,
+        shell_elements,
+    )?;
 
                     // ------------------------------------------------
                     // DAMAGE TRACKER
