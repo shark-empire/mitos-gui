@@ -1,4 +1,4 @@
-//! MITOS desktop and shell layout.
+u//! MITOS desktop and shell layout.
 //!
 //! This module owns the logical desktop configuration and shell geometry.
 //!
@@ -301,6 +301,8 @@ impl ShellLayout {
             None
         };
 
+
+        
         // ------------------------------------------------------------
         // Launcher
         //
@@ -334,7 +336,7 @@ impl ShellLayout {
                    MitosTheme::BORDER.g,
                    MitosTheme::BORDER.b,
                    MitosTheme::BORDER.a,
-                        ),
+             x           ),
             })
         } else {
             None
@@ -346,37 +348,73 @@ impl ShellLayout {
         // Centered horizontally at the bottom of the screen.
         // ------------------------------------------------------------
 
-        let dock = if config.dock {
-            let dock_height = config
-                .dock_height
-                .max(1.0)
-                .min(height as f32)
-                .round() as i32;
+        #[derive(Clone, Copy, Debug)]
+pub struct DockItem {
+    pub id: &'static str,
+}
 
-            let dock_width = ((width as f32) * 0.55)
-                .max(320.0)
-                .min(width as f32)
-                .round() as i32;
+#[derive(Clone, Debug)]
+pub struct DockLayout {
+    pub items: Vec<DockItem>,
+    pub icon_size: i32,
+    pub spacing: i32,
+}
 
-            let x = ((width - dock_width) / 2).max(0);
+        impl DockLayout {
+    pub fn default() -> Self {
+        Self {
+            items: vec![
+                DockItem { id: "launcher" },
+                DockItem { id: "files" },
+                DockItem { id: "terminal" },
+                DockItem { id: "browser" },
+                DockItem { id: "settings" },
+            ],
+            icon_size: 48,
+            spacing: 12,
+        }
+    }
+}
+// ------------------------------------------------------------
+// Dock
+//
+// Floating glass dock centered horizontally near the bottom.
+// ------------------------------------------------------------
 
-            let y = (height - dock_height - 20).max(0);
+let dock = if config.dock {
+    let dock_height = config
+        .dock_height
+        .max(64.0)
+        .min(height as f32)
+        .round() as i32;
 
-            Some(GlassPanel {
-    position: (x, y),
-    size: (dock_width, dock_height),
-    radius: MitosTheme::PANEL_RADIUS,
-    tint: crate::renderer::glass_color(),
-    border: Color32F::new(
-        MitosTheme::BORDER.r,
-        MitosTheme::BORDER.g,
-        MitosTheme::BORDER.b,
-        MitosTheme::BORDER.a,
-    ),
-})
-        } else {
-            None
-        };
+    let dock_width = ((width as f32) * 0.55)
+        .max(360.0)
+        .min(width as f32 - 32.0)
+        .max(1.0)
+        .round() as i32;
+
+    let bottom_margin = 20;
+
+    let x = ((width - dock_width) / 2).max(0);
+
+    let y = (height - dock_height - bottom_margin).max(0);
+
+    Some(GlassPanel {
+        position: (x, y),
+        size: (dock_width, dock_height),
+        radius: MitosTheme::PANEL_RADIUS,
+        tint: crate::renderer::glass_color(),
+        border: Color32F::new(
+            MitosTheme::BORDER.r,
+            MitosTheme::BORDER.g,
+            MitosTheme::BORDER.b,
+            MitosTheme::BORDER.a,
+        ),
+    })
+} else {
+    None
+};
 
         Self {
             top_bar,
