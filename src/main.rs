@@ -232,10 +232,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.shell.launcher = layout.launcher;
         state.shell.dock = layout.dock;
 
-        // Keep the old renderer-facing field synchronized
-        // for the current rendering path.
-        state.top_bar_panel =
-            state.shell.top_bar;
     }
 
     // ============================================================
@@ -350,8 +346,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state.shell.dock =
                                 layout.dock;
 
-                            state.top_bar_panel =
-                                state.shell.top_bar;
+        
                         }
                     }
 
@@ -442,11 +437,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             // Keep renderer-facing panel synchronized.
-            state.top_bar_panel = Some(panel);
+            state.shell.top_bar = Some(panel);
 
             let _ = height;
         } else {
-            state.top_bar_panel = None;
+           state.shell.top_bar = None;
         }
 
         // ========================================================
@@ -456,10 +451,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let render_result =
             backend.bind().and_then(
                 |(renderer, mut framebuffer)| {
-                    let top_bar_elements =
-                        if let Some(panel) =
-                            state.top_bar_panel.as_ref()
-                        {
+                    let top_bar_elements = if let Some(panel) = state.shell.top_bar.as_ref() {
                             renderer::collect_top_bar_elements(
                                 panel,
                                 &mut glass_panel_element,
