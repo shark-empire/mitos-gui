@@ -15,22 +15,29 @@
 //! The visual shell is deliberately implemented here.
 
 use smithay::{
-    backend::renderer::{
-        element::{
-            render_elements,
-            solid::{SolidColorBuffer, SolidColorRenderElement},
-            surface::WaylandSurfaceRenderElement,
-            AsRenderElements,
+    backend::{
+        allocator::Fourcc,
+        renderer::{
+            element::{
+                memory::{
+                    MemoryRenderBuffer,
+                    MemoryRenderBufferRenderElement,
+                },
+                render_elements,
+                solid::{SolidColorBuffer, SolidColorRenderElement},
+                surface::WaylandSurfaceRenderElement,
+                AsRenderElements,
+            },
+            gles::{
+                element::PixelShaderElement,
+                GlesError,
+                GlesRenderer,
+            },
+            Color32F,
         },
-        gles::{
-            element::PixelShaderElement,
-            GlesError,
-            GlesRenderer,
-        },
-        Color32F,
     },
     desktop::{Space, Window},
-    utils::{Rectangle, Scale},
+    utils::{Logical, Rectangle, Scale, Size, Transform},
 };
 
 use crate::desktop::HomeScreenConfig;
@@ -172,6 +179,169 @@ impl DesktopBackground {
     }
 }
 
+
+// ============================================================================
+// MITOS WALLPAPER
+// ============================================================================
+
+/// MITOS ships with its default wallpaper embedded into the executable.
+///
+/// This means the compositor does not depend on the current working
+/// directory when it starts.
+const DEFAULT_WALLPAPER: &[u8] =
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/wallpapers/mitos-default.png"
+    ));
+
+/// GPU-uploadable wallpaper source.
+///
+/// The image itself lives in a Smithay memory render buffer. Smithay
+/// maintains the renderer-specific texture internally, so the PNG is
+/// decoded once and the GPU texture is reused.
+#[derive(Clone, Debug)]
+pub struct Wallpaper {
+    pub buffer: MemoryRenderBuffer,
+    pub size: Size<i32, Logical>,
+}
+
+impl Wallpaper {
+    /// Load the built-in MITOS wallpaper.
+    pub fn load_default() -> Result<Self, String> {
+        let image =
+            image::load_from_memory(DEFAULT_WALLPAPER)
+                .map_err(|err| {
+                    format!(
+                        "failed to decode MITOS wallpaper: {err}"
+                    )
+                })?;
+
+        let rgba = image.to_rgba8();
+
+        let width = rgba.width() as i32;
+        let height = rgba.height() as i32;
+
+        if width <= 0 || height <= 0 {
+            return Err(
+                "MITOS wallpaper has invalid dimensions"
+                    .to_string()
+            );
+        }
+
+        let size =
+            Size::<i32, Logical>::from(
+                (width, height)
+            );
+
+        let buffer =
+            MemoryRenderBuffer::from_slice(
+                rgba.as_raw(),
+                Fourcc::Abgr8888,
+                size,
+                1,
+                Transform::Normal,
+                Some(vec![
+                    Rectangle::from_size(
+                        size
+                    ),
+                ]),
+            );
+
+        println!(
+            "MITOS GUI: wallpaper loaded ({}x{})",
+            width,
+            height
+        );
+
+        Ok(Self {
+            buffer,
+            size,
+        })
+    }
+
+    /// Create the render element for the current output.
+    ///
+    /// The image uses a "cover" strategy:
+    ///
+    /// - preserve aspect ratio
+    /// - fill the entire screen
+    /// - crop the excess
+    pub fn render_element(
+        &self,
+        renderer: &mut GlesRenderer,
+        output_size: Size<i32, Logical>,
+    ) -> Result<
+        MemoryRenderBufferRenderElement<GlesRenderer>,
+        GlesError,
+    > {
+        let image_width =
+            self.size.w as f64;
+
+        let image_height =
+            self.size.h as f64;
+
+        let output_width =
+            output_size.w.max(1) as f64;
+
+        let output_height =
+            output_size.h.max(1) as f64;
+
+        let image_aspect =
+            image_width / image_height;
+
+        let output_aspect =
+            output_width / output_height;
+
+        let src = if image_aspect > output_aspect {
+            // Image is wider than the screen.
+            //
+            // Crop left and right.
+            let visible_width =
+                image_height * output_aspect;
+
+            let x =
+                (image_width - visible_width) * 0.5;
+
+            Rectangle::new(
+                (x, 0.0).into(),
+                (
+                    visible_width,
+                    image_height,
+                )
+                    .into(),
+            )
+        } else {
+            // Image is taller than the screen.
+            //
+            // Crop top and bottom.
+            let visible_height =
+                image_width / output_aspect;
+
+            let y =
+                (image_height - visible_height) * 0.5;
+
+            Rectangle::new(
+                (0.0, y).into(),
+                (
+                    image_width,
+                    visible_height,
+                )
+                    .into(),
+            )
+        };
+
+        MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            (0.0, 0.0).into(),
+            &self.buffer,
+            Some(1.0),
+            Some(src),
+            Some(output_size),
+            smithay::backend::renderer::element::Kind::Unspecified,
+        )
+    }
+}
+
 pub fn background_color(
     home_screen: &HomeScreenConfig,
 ) -> Color32F {
@@ -198,6 +368,7 @@ pub fn clear_color(
 render_elements! {
     pub ChromeRenderElement<=GlesRenderer>;
 
+    Wallpaper=MemoryRenderBufferRenderElement<GlesRenderer>,
     Glass=PixelShaderElement,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     SolidColor=SolidColorRenderElement,
@@ -602,22 +773,42 @@ pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
     scale: Scale<f64>,
-    shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
-) -> Vec<ChromeRenderElement> {
+    wallpaper: &Wallpaper,
+    output_size: Size<i32, Logical>,
+    top_bar_elements: impl IntoIterator<Item = ChromeRenderElement>,
+) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
     // ------------------------------------------------------------
-    // MITOS shell
+    // WALLPAPER
     // ------------------------------------------------------------
 
-    elements.extend(shell_elements);
+    let wallpaper_element =
+        wallpaper.render_element(
+            renderer,
+            output_size,
+        )?;
+
+    elements.push(
+        ChromeRenderElement::Wallpaper(
+            wallpaper_element
+        )
+    );
 
     // ------------------------------------------------------------
-    // Client windows
+    // MITOS SHELL
+    // ------------------------------------------------------------
+
+    elements.extend(top_bar_elements);
+
+    // ------------------------------------------------------------
+    // CLIENT WINDOWS
     // ------------------------------------------------------------
 
     for window in space.elements().rev() {
-        let Some(location) = space.element_location(window) else {
+        let Some(location) =
+            space.element_location(window)
+        else {
             continue;
         };
 
@@ -636,5 +827,5 @@ pub fn collect_frame_elements(
         );
     }
 
-    elements
+    Ok(elements)
 }
