@@ -63,8 +63,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::fmt::init();
 
+    // ============================================================
+    // EVENT LOOP
+    // ============================================================
+
     let mut event_loop: EventLoop<MitosGuiState> =
         EventLoop::try_new()?;
+
+    // ============================================================
+    // WAYLAND DISPLAY
+    // ============================================================
 
     let mut display: Display<MitosGuiState> =
         Display::new()?;
@@ -96,7 +104,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ============================================================
 
     let compositor_state =
-        CompositorState::new::<MitosGuiState>(&display_handle);
+        CompositorState::new::<MitosGuiState>(
+            &display_handle,
+        );
 
     // ============================================================
     // SHM
@@ -118,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let xdg_shell_state =
         XdgShellState::new::<MitosGuiState>(
-            &display_handle
+            &display_handle,
         );
 
     // ============================================================
@@ -137,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _output_global =
         output.create_global::<MitosGuiState>(
-            &display_handle
+            &display_handle,
         );
 
     let mode = Mode {
@@ -209,14 +219,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ============================================================
     // INITIAL SHELL LAYOUT
-    //
-    // Stage 3:
-    //
-    // HomeScreenConfig
-    //        ↓
-    // ShellLayout::calculate()
-    //        ↓
-    // MitosShell
     // ============================================================
 
     if let Some(output_geometry) =
@@ -231,7 +233,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.shell.top_bar = layout.top_bar;
         state.shell.launcher = layout.launcher;
         state.shell.dock = layout.dock;
-
     }
 
     // ============================================================
@@ -272,20 +273,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         );
 
+    // ============================================================
+    // GLASS SHADERS
+    //
+    // One shader element per shell component.
+    // ============================================================
+
     let mut top_bar_glass =
-    renderer::create_glass_panel_element(
-        backend.renderer()
-    )?;
+        renderer::create_glass_panel_element(
+            backend.renderer(),
+        )?;
 
-let mut launcher_glass =
-    renderer::create_glass_panel_element(
-        backend.renderer()
-    )?;
+    let mut launcher_glass =
+        renderer::create_glass_panel_element(
+            backend.renderer(),
+        )?;
 
-let mut dock_glass =
-    renderer::create_glass_panel_element(
-        backend.renderer()
-    )?;
+    let mut dock_glass =
+        renderer::create_glass_panel_element(
+            backend.renderer(),
+        )?;
 
     // ============================================================
     // FULL REDRAW
@@ -312,6 +319,10 @@ let mut dock_glass =
         let pump_status =
             winit_event_loop.dispatch_new_events(
                 |event| match event {
+                    // ------------------------------------------------
+                    // WINDOW RESIZED
+                    // ------------------------------------------------
+
                     WinitEvent::Resized { size, .. } => {
                         let mode = Mode {
                             size,
@@ -329,13 +340,13 @@ let mut dock_glass =
 
                         damage_tracker =
                             OutputDamageTracker::from_output(
-                                &output
+                                &output,
                             );
 
                         full_redraw_frames = 4;
 
                         // ------------------------------------------------
-                        // Recalculate Stage 3 shell geometry.
+                        // Recalculate MITOS shell geometry.
                         // ------------------------------------------------
 
                         if let Some(output_geometry) =
@@ -355,10 +366,12 @@ let mut dock_glass =
 
                             state.shell.dock =
                                 layout.dock;
-
-        
                         }
                     }
+
+                    // ------------------------------------------------
+                    // INPUT
+                    // ------------------------------------------------
 
                     WinitEvent::Input(event) => {
                         input::process_input_event(
@@ -390,13 +403,13 @@ let mut dock_glass =
             display.handle().insert_client(
                 stream,
                 Arc::new(
-                    compositor::MitosClientState::default()
+                    compositor::MitosClientState::default(),
                 ),
             )?;
         }
 
         // ========================================================
-        // RENDER
+        // BUFFER AGE
         // ========================================================
 
         let age = if full_redraw_frames > 0 {
@@ -404,6 +417,10 @@ let mut dock_glass =
         } else {
             backend.buffer_age().unwrap_or(0)
         };
+
+        // ========================================================
+        // OUTPUT SCALE
+        // ========================================================
 
         let scale =
             Scale::from(
@@ -418,21 +435,29 @@ let mut dock_glass =
             state.shell.top_bar
         {
             let width = panel.size.0;
-            let height = panel.size.1;
 
-            // Shadow.
+            // ----------------------------------------------------
+            // Shadow
+            // ----------------------------------------------------
+
             top_bar_shadow_buffer.update(
                 (width, 8),
                 renderer::shadow_color(),
             );
 
-            // Highlight.
+            // ----------------------------------------------------
+            // Highlight
+            // ----------------------------------------------------
+
             top_bar_highlight_buffer.update(
                 (width, 2),
                 renderer::glass_highlight_color(),
             );
 
-            // Border.
+            // ----------------------------------------------------
+            // Border
+            // ----------------------------------------------------
+
             let border =
                 theme::MitosTheme::BORDER;
 
@@ -446,12 +471,10 @@ let mut dock_glass =
                 ),
             );
 
-            // Keep renderer-facing panel synchronized.
-            state.shell.top_bar = Some(panel);
-
-            let _ = height;
+            state.shell.top_bar =
+                Some(panel);
         } else {
-           state.shell.top_bar = None;
+            state.shell.top_bar = None;
         }
 
         // ========================================================
@@ -461,26 +484,41 @@ let mut dock_glass =
         let render_result =
             backend.bind().and_then(
                 |(renderer, mut framebuffer)| {
-        let shell_elements =
-      renderer::collect_shell_elements(
-        renderer,
-        &state.shell,
-        &mut top_bar_glass,
-        &mut launcher_glass,
-        &mut dock_glass,
-        &top_bar_shadow_buffer,
-        &top_bar_highlight_buffer,
-        &top_bar_border_buffer,
-        scale,
-    );
+                    // ------------------------------------------------
+                    // MITOS SHELL
+                    // ------------------------------------------------
+                    //
+                    // renderer.rs owns the actual panel rendering.
+                    //
 
-let elements =
-    renderer::collect_frame_elements(
-        renderer,
-        &state.space,
-        scale,
-        shell_elements,
-    );
+                    let shell_elements =
+                        renderer::collect_shell_elements(
+                            renderer,
+                            &state.shell,
+                            &mut top_bar_glass,
+                            &mut launcher_glass,
+                            &mut dock_glass,
+                            &top_bar_shadow_buffer,
+                            &top_bar_highlight_buffer,
+                            &top_bar_border_buffer,
+                            scale,
+                        );
+
+                    // ------------------------------------------------
+                    // SHELL + CLIENT WINDOWS
+                    // ------------------------------------------------
+
+                    let elements =
+                        renderer::collect_frame_elements(
+                            renderer,
+                            &state.space,
+                            scale,
+                            shell_elements,
+                        );
+
+                    // ------------------------------------------------
+                    // DAMAGE TRACKER
+                    // ------------------------------------------------
 
                     damage_tracker
                         .render_output(
@@ -489,12 +527,12 @@ let elements =
                             age,
                             &elements,
                             renderer::clear_color(
-                                &state.home_screen
+                                &state.home_screen,
                             ),
                         )
                         .map_err(|err| match err {
                             DamageTrackerError::Rendering(
-                                err
+                                err,
                             ) => err.into(),
 
                             _ => unreachable!(
@@ -526,10 +564,11 @@ let elements =
                     full_redraw_frames.saturating_sub(1);
 
                 // ------------------------------------------------
-                // Frame callbacks.
+                // Frame callbacks
                 // ------------------------------------------------
 
-                let now = state.clock.now();
+                let now =
+                    state.clock.now();
 
                 for window in state.space.elements() {
                     window.send_frame(
@@ -541,6 +580,10 @@ let elements =
                 }
             }
 
+            // ----------------------------------------------------
+            // GPU CONTEXT LOST
+            // ----------------------------------------------------
+
             Err(
                 SwapBuffersError::ContextLost(err)
             ) => {
@@ -550,6 +593,10 @@ let elements =
 
                 break;
             }
+
+            // ----------------------------------------------------
+            // OTHER RENDER ERROR
+            // ----------------------------------------------------
 
             Err(err) => {
                 tracing::warn!(
@@ -565,7 +612,10 @@ let elements =
         state.space.refresh();
         state.popups.cleanup();
 
-        display.dispatch_clients(&mut state)?;
+        display.dispatch_clients(
+            &mut state,
+        )?;
+
         display.flush_clients()?;
 
         event_loop.dispatch(
