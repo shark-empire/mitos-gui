@@ -461,27 +461,26 @@ let mut dock_glass =
         let render_result =
             backend.bind().and_then(
                 |(renderer, mut framebuffer)| {
-                    let top_bar_elements = if let Some(panel) = state.shell.top_bar.as_ref() {
-                            renderer::collect_top_bar_elements(
-                                panel,
-                                &mut top_bar_glass,
-                                &top_bar_shadow_buffer,
-                                &top_bar_highlight_buffer,
-                                &top_bar_border_buffer,
-                                renderer,
-                                scale,
-                            )
-                        } else {
-                            Vec::new()
-                        };
+        let shell_elements =
+      renderer::collect_shell_elements(
+        renderer,
+        &state.shell,
+        &mut top_bar_glass,
+        &mut launcher_glass,
+        &mut dock_glass,
+        &top_bar_shadow_buffer,
+        &top_bar_highlight_buffer,
+        &top_bar_border_buffer,
+        scale,
+    );
 
-                    let elements =
-                        renderer::collect_frame_elements(
-                            renderer,
-                            &state.space,
-                            scale,
-                            top_bar_elements,
-                        );
+let elements =
+    renderer::collect_frame_elements(
+        renderer,
+        &state.space,
+        scale,
+        shell_elements,
+    );
 
                     damage_tracker
                         .render_output(
