@@ -1,4 +1,4 @@
-u//! MITOS desktop and shell layout.
+//! MITOS desktop and shell layout.
 //!
 //! This module owns the logical desktop configuration and shell geometry.
 //!
