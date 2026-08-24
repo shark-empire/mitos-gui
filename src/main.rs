@@ -533,15 +533,15 @@ let wallpaper =
                 .to_i32_round()
         });
 
-let elements =
-    renderer::collect_frame_elements(
-        renderer,
-        &state.space,
-        scale,
-        &wallpaper,
-        output_size,
-        shell_elements,
-    )?;
+let elements = renderer::collect_frame_elements(
+    renderer,
+    &state.space,
+    scale,
+    &wallpaper,
+    output_size,
+    shell_elements,
+    std::iter::empty(),
+)?;
 
                     // ------------------------------------------------
                     // DAMAGE TRACKER
