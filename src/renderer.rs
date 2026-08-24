@@ -757,50 +757,37 @@ pub fn collect_shell_elements(
     elements
 }
 
-// ============================================================================
-// COMPLETE FRAME
-// ============================================================================
-
-/// Collect all render elements for one frame.
-///
-/// Shell elements are rendered first, followed by client windows.
-///
-/// Client windows are traversed from front to back according to the
-/// compositor's `Space`.
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
     scale: Scale<f64>,
     wallpaper: &Wallpaper,
     output_size: Size<i32, Logical>,
-    top_bar_elements: impl IntoIterator<Item = ChromeRenderElement>,
+    shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
+    overlay_elements: impl IntoIterator<Item = ChromeRenderElement>,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
     // ------------------------------------------------------------
-    // WALLPAPER
+    // 1. WALLPAPER
     // ------------------------------------------------------------
 
     let wallpaper_element =
-        wallpaper.render_element(
-            renderer,
-            output_size,
-        )?;
+        wallpaper.render_element(renderer, output_size)?;
 
     elements.push(
-        ChromeRenderElement::Wallpaper(
-            wallpaper_element
-        )
+        ChromeRenderElement::Wallpaper(wallpaper_element)
     );
 
     // ------------------------------------------------------------
-    // MITOS SHELL
+    // 2. MITOS SHELL
+    //    Dock + top bar
     // ------------------------------------------------------------
 
-    elements.extend(top_bar_elements);
+    elements.extend(shell_elements);
 
     // ------------------------------------------------------------
-    // CLIENT WINDOWS
+    // 3. WAYLAND APPLICATION WINDOWS
     // ------------------------------------------------------------
 
     for window in space.elements().rev() {
@@ -824,6 +811,13 @@ pub fn collect_frame_elements(
             ),
         );
     }
+
+    // ------------------------------------------------------------
+    // 4. MITOS OVERLAYS
+    //    Launcher, dialogs, etc.
+    // ------------------------------------------------------------
+
+    elements.extend(overlay_elements);
 
     Ok(elements)
 }
