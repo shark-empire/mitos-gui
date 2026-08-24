@@ -427,6 +427,137 @@ pub fn collect_launcher_elements(
 
     elements
 }
+
+pub fn collect_dock_elements(
+    panel: &GlassPanel,
+    glass_panel: &mut PixelShaderElement,
+    shadow_buffer: &SolidColorBuffer,
+    highlight_buffer: &SolidColorBuffer,
+    border_buffer: &SolidColorBuffer,
+    renderer: &mut GlesRenderer,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+
+    let (x, y) = panel.position;
+    let (width, height) = panel.size;
+
+    glass_panel.resize(
+        Rectangle::new(
+            (x, y).into(),
+            (width, height).into(),
+        ),
+        None,
+    );
+
+    elements.push(
+        ChromeRenderElement::Glass(
+            glass_panel.clone(),
+        ),
+    );
+
+    elements.extend(
+        shadow_buffer.render_elements(
+            renderer,
+            (x, y + height).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    elements.extend(
+        highlight_buffer.render_elements(
+            renderer,
+            (x, y).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    elements.extend(
+        border_buffer.render_elements(
+            renderer,
+            (x, y + height - 1).into(),
+            scale,
+            1.0,
+        ),
+    );
+
+    elements
+}
+
+pub fn collect_shell_elements(
+    renderer: &mut GlesRenderer,
+    shell: &crate::state::MitosShell,
+    top_bar_glass: &mut PixelShaderElement,
+    launcher_glass: &mut PixelShaderElement,
+    dock_glass: &mut PixelShaderElement,
+    top_bar_shadow: &SolidColorBuffer,
+    top_bar_highlight: &SolidColorBuffer,
+    top_bar_border: &SolidColorBuffer,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+
+    // ------------------------------------------------------------
+    // TOP BAR
+    // ------------------------------------------------------------
+
+    if let Some(panel) = shell.top_bar.as_ref() {
+        elements.extend(
+            collect_top_bar_elements(
+                panel,
+                top_bar_glass,
+                top_bar_shadow,
+                top_bar_highlight,
+                top_bar_border,
+                renderer,
+                scale,
+            ),
+        );
+    }
+
+    // ------------------------------------------------------------
+    // LAUNCHER
+    // ------------------------------------------------------------
+
+    if shell.launcher_visible {
+        if let Some(panel) = shell.launcher.as_ref() {
+            elements.extend(
+                collect_launcher_elements(
+                    panel,
+                    launcher_glass,
+                    top_bar_shadow,
+                    top_bar_highlight,
+                    top_bar_border,
+                    renderer,
+                    scale,
+                ),
+            );
+        }
+    }
+
+    // ------------------------------------------------------------
+    // DOCK
+    // ------------------------------------------------------------
+
+    if let Some(panel) = shell.dock.as_ref() {
+        elements.extend(
+            collect_dock_elements(
+                panel,
+                dock_glass,
+                top_bar_shadow,
+                top_bar_highlight,
+                top_bar_border,
+                renderer,
+                scale,
+            ),
+        );
+    }
+
+    elements
+}
+
 /// Collect render elements for one frame.
 ///
 /// The MITOS shell is placed first, followed by client windows.
