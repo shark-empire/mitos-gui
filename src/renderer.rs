@@ -442,6 +442,10 @@ pub fn collect_dock_elements(
     let (x, y) = panel.position;
     let (width, height) = panel.size;
 
+    // ------------------------------------------------------------
+    // Rounded GPU glass panel
+    // ------------------------------------------------------------
+
     glass_panel.resize(
         Rectangle::new(
             (x, y).into(),
@@ -452,9 +456,13 @@ pub fn collect_dock_elements(
 
     elements.push(
         ChromeRenderElement::Glass(
-            glass_panel.clone(),
-        ),
+            glass_panel.clone()
+        )
     );
+
+    // ------------------------------------------------------------
+    // Soft shadow
+    // ------------------------------------------------------------
 
     elements.extend(
         shadow_buffer.render_elements(
@@ -465,6 +473,10 @@ pub fn collect_dock_elements(
         ),
     );
 
+    // ------------------------------------------------------------
+    // Highlight
+    // ------------------------------------------------------------
+
     elements.extend(
         highlight_buffer.render_elements(
             renderer,
@@ -473,6 +485,10 @@ pub fn collect_dock_elements(
             1.0,
         ),
     );
+
+    // ------------------------------------------------------------
+    // Bottom border
+    // ------------------------------------------------------------
 
     elements.extend(
         border_buffer.render_elements(
