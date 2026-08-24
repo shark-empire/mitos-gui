@@ -169,12 +169,12 @@ let wallpaper =
         refresh: 60_000,
     };
 
-    output.change_current_state(
-        Some(mode),
-        Some(Transform::Flipped180),
-        None,
-        Some((0, 0).into()),
-    );
+ output.change_current_state(
+    Some(mode),
+    Some(Transform::Normal),
+    None,
+    Some((0, 0).into()),
+);
 
     output.set_preferred(mode);
 
