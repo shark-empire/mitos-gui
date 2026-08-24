@@ -1,6 +1,18 @@
 //! GPU rendering for the MITOS desktop.
 //!
 //! Backend-agnostic rendering helpers for the MITOS compositor.
+//!
+//! Stage 3 responsibilities:
+//! - desktop background
+//! - translucent glass panels
+//! - rounded corners
+//! - panel borders
+//! - panel highlights
+//! - panel shadows
+//! - client window composition
+//!
+//! Wayland itself does not provide the MITOS glass effect.
+//! The visual shell is deliberately implemented here.
 
 use smithay::{
     backend::renderer::{
@@ -8,7 +20,6 @@ use smithay::{
             render_elements,
             solid::{SolidColorBuffer, SolidColorRenderElement},
             surface::WaylandSurfaceRenderElement,
-            AsRenderElements,
         },
         gles::{
             element::PixelShaderElement,
@@ -18,44 +29,50 @@ use smithay::{
         Color32F,
     },
     desktop::{Space, Window},
-    utils::{Logical, Rectangle, Scale},
+    utils::{Rectangle, Scale},
 };
 
 use crate::desktop::HomeScreenConfig;
 use crate::theme::MitosTheme;
 
+// ============================================================================
+// GLASS PANEL
+// ============================================================================
+
 /// Description of a MITOS glass panel.
 ///
-/// This is currently shell-side geometry/style information.
-/// The actual blur, rounded corners and compositing will be
-/// implemented by the renderer in a later Stage 3 pass.
+/// Geometry and visual properties live here. The renderer converts this
+/// description into GPU render elements.
 #[derive(Clone, Copy, Debug)]
 pub struct GlassPanel {
+    /// Top-left position in logical compositor coordinates.
     pub position: (i32, i32),
+
+    /// Panel width and height in logical pixels.
     pub size: (i32, i32),
+
+    /// Rounded-corner radius.
     pub radius: f32,
+
+    /// Main translucent glass tint.
     pub tint: Color32F,
+
+    /// Panel border color.
     pub border: Color32F,
 }
 
 impl GlassPanel {
+    /// Create the MITOS top bar.
     pub fn top_bar(width: i32, height: i32) -> Self {
-        let border = MitosTheme::BORDER;
-
-        Self {
-            position: (0, 0),
-            size: (width, height),
-            radius: MitosTheme::PANEL_RADIUS,
-            tint: glass_color(),
-            border: Color32F::new(
-                border.r,
-                border.g,
-                border.b,
-                border.a,
-            ),
-        }
+        Self::new(
+            (0, 0),
+            (width, height),
+            MitosTheme::PANEL_RADIUS,
+            glass_color(),
+        )
     }
 
+    /// Create the MITOS launcher.
     pub fn launcher(
         screen_width: i32,
         screen_height: i32,
@@ -63,16 +80,31 @@ impl GlassPanel {
         let width = 720;
         let height = 480;
 
-        let x = (screen_width - width) / 2;
-        let y = (screen_height - height) / 2;
+        let x = ((screen_width - width) / 2).max(0);
+        let y = ((screen_height - height) / 2).max(0);
 
+        Self::new(
+            (x, y),
+            (width, height),
+            MitosTheme::PANEL_RADIUS,
+            glass_color(),
+        )
+    }
+
+    /// Create a generic glass panel.
+    pub fn new(
+        position: (i32, i32),
+        size: (i32, i32),
+        radius: f32,
+        tint: Color32F,
+    ) -> Self {
         let border = MitosTheme::BORDER;
 
         Self {
-            position: (x, y),
-            size: (width, height),
-            radius: MitosTheme::PANEL_RADIUS,
-            tint: glass_color(),
+            position,
+            size,
+            radius,
+            tint,
             border: Color32F::new(
                 border.r,
                 border.g,
@@ -83,9 +115,9 @@ impl GlassPanel {
     }
 }
 
-// ------------------------------------------------------------
-// MITOS Desktop Background
-// ------------------------------------------------------------
+// ============================================================================
+// DESKTOP BACKGROUND
+// ============================================================================
 
 #[derive(Clone, Copy, Debug)]
 pub enum BackgroundMode {
@@ -158,6 +190,10 @@ pub fn clear_color(
     background_color(home_screen)
 }
 
+// ============================================================================
+// RENDER ELEMENT TYPES
+// ============================================================================
+
 render_elements! {
     pub ChromeRenderElement<=GlesRenderer>;
 
@@ -166,7 +202,9 @@ render_elements! {
     SolidColor=SolidColorRenderElement,
 }
 
-
+// ============================================================================
+// THEME COLORS
+// ============================================================================
 
 /// Main translucent MITOS glass color.
 pub fn glass_color() -> Color32F {
@@ -180,7 +218,7 @@ pub fn glass_color() -> Color32F {
     )
 }
 
-/// Subtle highlight used for layered glass effects.
+/// Subtle highlight used along the upper edge of glass panels.
 pub fn glass_highlight_color() -> Color32F {
     let c = MitosTheme::GLASS_HIGHLIGHT;
 
@@ -192,7 +230,7 @@ pub fn glass_highlight_color() -> Color32F {
     )
 }
 
-/// Shadow color used behind shell panels.
+/// Shadow used beneath glass panels.
 pub fn shadow_color() -> Color32F {
     let c = MitosTheme::SHADOW;
 
@@ -209,10 +247,20 @@ pub fn top_bar_color() -> Color32F {
     glass_color()
 }
 
-/// Compile the GPU shader used for the MITOS glass panel.
+// ============================================================================
+// GLASS SHADER
+// ============================================================================
+
+/// Compile the reusable GPU shader used for MITOS glass panels.
 ///
-/// The shader generates the rounded corners directly in GLES.
-/// The panel geometry is supplied later through `PixelShaderElement::resize`.
+/// The shader:
+/// - draws a translucent panel
+/// - creates rounded corners using a signed-distance function
+/// - anti-aliases the rounded edge
+///
+/// Panel tint and radius are currently supplied when the shader is generated.
+/// This keeps the implementation compatible with the current Smithay
+/// `PixelShaderElement` API while we build the Stage 3 renderer.
 pub fn create_glass_panel_element(
     renderer: &mut GlesRenderer,
 ) -> Result<PixelShaderElement, GlesError> {
@@ -236,19 +284,15 @@ const vec4 GLASS_COLOR = vec4(
 );
 
 void main() {{
-    // Convert normalized coordinates into panel pixels.
     vec2 position = v_coords * size;
 
     vec2 half_size = size * 0.5;
 
-    // Prevent the radius from becoming larger than half
-    // the smallest panel dimension.
     float radius = min(
         RADIUS,
         min(size.x, size.y) * 0.5
     );
 
-    // Signed-distance rounded rectangle.
     vec2 q = abs(position - half_size)
         - (half_size - vec2(radius));
 
@@ -256,7 +300,6 @@ void main() {{
         + min(max(q.x, q.y), 0.0)
         - radius;
 
-    // One-pixel anti-aliased edge.
     float alpha = 1.0 - smoothstep(
         0.0,
         1.0,
@@ -294,7 +337,24 @@ void main() {{
     ))
 }
 
-pub fn collect_top_bar_elements(
+// ============================================================================
+// GENERIC GLASS PANEL RENDERING
+// ============================================================================
+
+/// Render one glass panel and its supporting visual layers.
+///
+/// Every MITOS shell component uses the same rendering pipeline:
+///
+///     shadow
+///        ↓
+///     glass
+///        ↓
+///     highlight
+///        ↓
+///     border
+///
+/// This is the core of the MITOS Stage 3 visual shell.
+fn collect_glass_panel_elements(
     panel: &GlassPanel,
     glass_panel: &mut PixelShaderElement,
     shadow_buffer: &SolidColorBuffer,
@@ -308,8 +368,12 @@ pub fn collect_top_bar_elements(
     let (x, y) = panel.position;
     let (width, height) = panel.size;
 
+    if width <= 0 || height <= 0 {
+        return elements;
+    }
+
     // ------------------------------------------------------------
-    // Rounded GPU glass panel
+    // Rounded glass body
     // ------------------------------------------------------------
 
     glass_panel.resize(
@@ -322,12 +386,12 @@ pub fn collect_top_bar_elements(
 
     elements.push(
         ChromeRenderElement::Glass(
-            glass_panel.clone()
-        )
+            glass_panel.clone(),
+        ),
     );
 
     // ------------------------------------------------------------
-    // Soft shadow
+    // Shadow
     // ------------------------------------------------------------
 
     elements.extend(
@@ -340,7 +404,7 @@ pub fn collect_top_bar_elements(
     );
 
     // ------------------------------------------------------------
-    // Highlight
+    // Top highlight
     // ------------------------------------------------------------
 
     elements.extend(
@@ -365,10 +429,36 @@ pub fn collect_top_bar_elements(
         ),
     );
 
-
-
     elements
 }
+
+// ============================================================================
+// TOP BAR
+// ============================================================================
+
+pub fn collect_top_bar_elements(
+    panel: &GlassPanel,
+    glass_panel: &mut PixelShaderElement,
+    shadow_buffer: &SolidColorBuffer,
+    highlight_buffer: &SolidColorBuffer,
+    border_buffer: &SolidColorBuffer,
+    renderer: &mut GlesRenderer,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    collect_glass_panel_elements(
+        panel,
+        glass_panel,
+        shadow_buffer,
+        highlight_buffer,
+        border_buffer,
+        renderer,
+        scale,
+    )
+}
+
+// ============================================================================
+// LAUNCHER
+// ============================================================================
 
 pub fn collect_launcher_elements(
     panel: &GlassPanel,
@@ -379,54 +469,20 @@ pub fn collect_launcher_elements(
     renderer: &mut GlesRenderer,
     scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
-    let mut elements = Vec::new();
-
-    let (x, y) = panel.position;
-    let (width, height) = panel.size;
-
-    glass_panel.resize(
-        Rectangle::new(
-            (x, y).into(),
-            (width, height).into(),
-        ),
-        None,
-    );
-
-    elements.push(
-        ChromeRenderElement::Glass(
-            glass_panel.clone()
-        )
-    );
-
-    elements.extend(
-        shadow_buffer.render_elements(
-            renderer,
-            (x, y + height).into(),
-            scale,
-            1.0,
-        ),
-    );
-
-    elements.extend(
-        highlight_buffer.render_elements(
-            renderer,
-            (x, y).into(),
-            scale,
-            1.0,
-        ),
-    );
-
-    elements.extend(
-        border_buffer.render_elements(
-            renderer,
-            (x, y + height - 1).into(),
-            scale,
-            1.0,
-        ),
-    );
-
-    elements
+    collect_glass_panel_elements(
+        panel,
+        glass_panel,
+        shadow_buffer,
+        highlight_buffer,
+        border_buffer,
+        renderer,
+        scale,
+    )
 }
+
+// ============================================================================
+// DOCK
+// ============================================================================
 
 pub fn collect_dock_elements(
     panel: &GlassPanel,
@@ -437,71 +493,28 @@ pub fn collect_dock_elements(
     renderer: &mut GlesRenderer,
     scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
-    let mut elements = Vec::new();
-
-    let (x, y) = panel.position;
-    let (width, height) = panel.size;
-
-    // ------------------------------------------------------------
-    // Rounded GPU glass panel
-    // ------------------------------------------------------------
-
-    glass_panel.resize(
-        Rectangle::new(
-            (x, y).into(),
-            (width, height).into(),
-        ),
-        None,
-    );
-
-    elements.push(
-        ChromeRenderElement::Glass(
-            glass_panel.clone()
-        )
-    );
-
-    // ------------------------------------------------------------
-    // Soft shadow
-    // ------------------------------------------------------------
-
-    elements.extend(
-        shadow_buffer.render_elements(
-            renderer,
-            (x, y + height).into(),
-            scale,
-            1.0,
-        ),
-    );
-
-    // ------------------------------------------------------------
-    // Highlight
-    // ------------------------------------------------------------
-
-    elements.extend(
-        highlight_buffer.render_elements(
-            renderer,
-            (x, y).into(),
-            scale,
-            1.0,
-        ),
-    );
-
-    // ------------------------------------------------------------
-    // Bottom border
-    // ------------------------------------------------------------
-
-    elements.extend(
-        border_buffer.render_elements(
-            renderer,
-            (x, y + height - 1).into(),
-            scale,
-            1.0,
-        ),
-    );
-
-    elements
+    collect_glass_panel_elements(
+        panel,
+        glass_panel,
+        shadow_buffer,
+        highlight_buffer,
+        border_buffer,
+        renderer,
+        scale,
+    )
 }
 
+// ============================================================================
+// COMPLETE MITOS SHELL
+// ============================================================================
+
+/// Collect every visible MITOS shell element.
+///
+/// Shell order:
+///
+/// 1. Top bar
+/// 2. Launcher, when visible
+/// 3. Dock
 pub fn collect_shell_elements(
     renderer: &mut GlesRenderer,
     shell: &crate::state::MitosShell,
@@ -574,16 +587,21 @@ pub fn collect_shell_elements(
     elements
 }
 
-/// Collect render elements for one frame.
+// ============================================================================
+// COMPLETE FRAME
+// ============================================================================
+
+/// Collect all render elements for one frame.
 ///
-/// The MITOS shell is placed first, followed by client windows.
+/// Shell elements are rendered first, followed by client windows.
 ///
-/// Windows are reversed so the frontmost window is processed first.
+/// Client windows are traversed from front to back according to the
+/// compositor's `Space`.
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
     scale: Scale<f64>,
-    top_bar_elements: impl IntoIterator<Item = ChromeRenderElement>,
+    shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
 
@@ -591,7 +609,7 @@ pub fn collect_frame_elements(
     // MITOS shell
     // ------------------------------------------------------------
 
-    elements.extend(top_bar_elements);
+    elements.extend(shell_elements);
 
     // ------------------------------------------------------------
     // Client windows
