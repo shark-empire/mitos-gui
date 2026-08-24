@@ -288,6 +288,37 @@ let wallpaper =
         );
 
     // ============================================================
+// DOCK GPU BUFFERS
+// ============================================================
+
+let mut dock_shadow_buffer =
+    SolidColorBuffer::new(
+        (0, 0),
+        renderer::shadow_color(),
+    );
+
+let mut dock_highlight_buffer =
+    SolidColorBuffer::new(
+        (0, 0),
+        renderer::glass_highlight_color(),
+    );
+
+let mut dock_border_buffer =
+    SolidColorBuffer::new(
+        (0, 0),
+        {
+            let c = theme::MitosTheme::BORDER;
+
+            smithay::backend::renderer::Color32F::new(
+                c.r,
+                c.g,
+                c.b,
+                c.a,
+            )
+        },
+    );
+
+    // ============================================================
     // GLASS SHADERS
     //
     // One shader element per shell component.
@@ -491,6 +522,39 @@ let wallpaper =
             state.shell.top_bar = None;
         }
 
+
+
+
+        // ============================================================
+// DOCK GPU RESOURCES
+// ============================================================
+
+if let Some(panel) = state.shell.dock {
+    let width = panel.size.0;
+
+    dock_shadow_buffer.update(
+        (width, 12),
+        renderer::shadow_color(),
+    );
+
+    dock_highlight_buffer.update(
+        (width, 2),
+        renderer::glass_highlight_color(),
+    );
+
+    let border = theme::MitosTheme::BORDER;
+
+    dock_border_buffer.update(
+        (width, 1),
+        smithay::backend::renderer::Color32F::new(
+            border.r,
+            border.g,
+            border.b,
+            border.a,
+        ),
+    );
+}
+        
         // ========================================================
         // DRAW FRAME
         // ========================================================
@@ -505,18 +569,25 @@ let wallpaper =
                     // renderer.rs owns the actual panel rendering.
                     //
 
-                    let shell_elements =
-                        renderer::collect_shell_elements(
-                            renderer,
-                            &state.shell,
-                            &mut top_bar_glass,
-                            &mut launcher_glass,
-                            &mut dock_glass,
-                            &top_bar_shadow_buffer,
-                            &top_bar_highlight_buffer,
-                            &top_bar_border_buffer,
-                            scale,
-                        );
+     let shell_elements =
+    renderer::collect_shell_elements(
+        renderer,
+        &state.shell,
+
+        &mut top_bar_glass,
+        &mut launcher_glass,
+        &mut dock_glass,
+
+        &top_bar_shadow_buffer,
+        &top_bar_highlight_buffer,
+        &top_bar_border_buffer,
+
+        &dock_shadow_buffer,
+        &dock_highlight_buffer,
+        &dock_border_buffer,
+
+        scale,
+    );
 
                     // ------------------------------------------------
                     // SHELL + CLIENT WINDOWS
