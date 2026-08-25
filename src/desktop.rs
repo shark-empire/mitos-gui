@@ -331,12 +331,12 @@ impl ShellLayout {
                 size: (launcher_width, launcher_height),
                 radius: MitosTheme::PANEL_RADIUS,
                 tint: crate::renderer::glass_color(),
-                border: Color32F::new(
-                   MitosTheme::BORDER.r,
-                   MitosTheme::BORDER.g,
-                   MitosTheme::BORDER.b,
-                   MitosTheme::BORDER.a,
-             x           ),
+ border: Color32F::new(
+    MitosTheme::BORDER.r,
+    MitosTheme::BORDER.g,
+    MitosTheme::BORDER.b,
+    MitosTheme::BORDER.a,
+),
             })
         } else {
             None
