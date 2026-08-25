@@ -47,16 +47,41 @@ pub struct MitosShell {
 }
 
 impl MitosShell {
-    /// Create an empty MITOS shell.
     pub fn new() -> Self {
         Self {
             top_bar: None,
             launcher: None,
             dock: None,
-            launcher_visible: false,
             dock_layout: crate::desktop::DockLayout::default(),
+            launcher_visible: false,
         }
     }
+
+    /// Recalculate shell geometry for the current output.
+    pub fn update_layout(
+        &mut self,
+        config: &HomeScreenConfig,
+        output_size: smithay::utils::Size<
+            i32,
+            smithay::utils::Logical,
+        >,
+    ) {
+        let layout =
+            crate::desktop::ShellLayout::calculate(
+                config,
+                output_size,
+            );
+
+        self.top_bar = layout.top_bar;
+        self.launcher = layout.launcher;
+        self.dock = layout.dock;
+    }
+
+    /// Toggle the launcher visibility.
+   /// Toggle the launcher visibility.
+pub fn toggle_launcher(&mut self) {
+    self.launcher_visible = !self.launcher_visible;
+}
 }
 
 // ============================================================================
@@ -159,35 +184,36 @@ impl MitosGuiState {
 
         space.map_output(&output, (0, 0));
 
+
+        let mut shell = MitosShell::new();
+
+shell.update_layout(
+    &home_screen,
+    output.current_logical_size(),
+);
         // ------------------------------------------------------------
         // Global state
         // ------------------------------------------------------------
 
-        Self {
-            // Wayland
-            compositor_state,
-            xdg_shell_state,
-            shm_state,
+ Self {
+    compositor_state,
+    xdg_shell_state,
+    shm_state,
 
-            // Input
-            seat_state,
-            seat,
+    seat_state,
+    seat,
 
-            // MITOS shell
-            shell: MitosShell::new(),
+    shell,
 
-            // Output
-            output,
+    output,
 
-            // Desktop
-            home_screen,
-            space,
-            popups: PopupManager::default(),
+    home_screen,
+    space,
+    popups: PopupManager::default(),
 
-            // Pointer / timing
-            pointer_location: (0.0, 0.0).into(),
-            clock: Clock::new(),
-        }
+    pointer_location: (0.0, 0.0).into(),
+    clock: Clock::new(),
+      }
     }
 }
 
