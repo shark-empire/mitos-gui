@@ -40,6 +40,7 @@ use smithay::{
     utils::{Logical, Rectangle, Scale, Size, Transform},
 };
 
+
 use crate::desktop::HomeScreenConfig;
 use crate::theme::MitosTheme;
 
@@ -726,9 +727,9 @@ fn collect_dock_icon_elements(
         let y = center_y;
 
         let color = if item.active {
-            theme::MitosTheme::ACCENT
+            MitosTheme::ACCENT
         } else {
-            theme::MitosTheme::GLASS_LIGHT
+            MitosTheme::GLASS_LIGHT
         };
 
         let buffer = SolidColorBuffer::new(
