@@ -12,10 +12,6 @@ jobs:
     name: Build MITOS GUI
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: mitos-gui
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -51,8 +47,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            mitos-gui/target
-          key: ${{ runner.os }}-cargo-mitos-gui-${{ hashFiles('mitos-gui/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-mitos-gui-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-mitos-gui-
 
@@ -64,15 +60,15 @@ jobs:
 
       - name: Prepare artifact
         run: |
-          mkdir -p ../mitos-gui-artifact
-          cp target/release/mitos-gui ../mitos-gui-artifact/
-          cp Cargo.toml ../mitos-gui-artifact/
-          cp Cargo.lock ../mitos-gui-artifact/
+          mkdir -p mitos-gui-artifact
+          cp target/release/mitos-gui mitos-gui-artifact/
+          cp Cargo.toml mitos-gui-artifact/
+          cp Cargo.lock mitos-gui-artifact/
 
       - name: Upload MITOS GUI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: mitos-gui-linux-x86_64
-          path: mitos-gui/mitos-gui-artifact/
+          path: mitos-gui-artifact/
           retention-days: 30
           if-no-files-found: error
