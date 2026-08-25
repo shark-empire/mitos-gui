@@ -1,25 +1,35 @@
-//! Keyboard input.
-//!
-//! Winit is both our display backend and, for now, our input source --
-//! it forwards host keyboard events into the same shape a real
-//! libinput backend will produce once Stage 5 lands, so nothing here
-//! is winit-specific beyond the generic `InputBackend` parameter.
+/// Feeds one raw key event into the seat's keyboard handle.
+///
+/// MITOS intercepts compositor-level shortcuts before forwarding
+/// the key to the focused Wayland client.
+///
+/// Current shortcuts:
+///
+/// - Super + Space → toggle launcher
+///
+/// Stage 4 will expand this into:
+///
+/// - Super + Q       → close window
+/// - Super + W       → move window
+/// - Super + arrows  → resize/move
+/// - Super + 1..9    → workspace switching
+/// - Super + M       → maximize
+///
+/// All other keys are forwarded normally to the focused client.
 
-use smithay::backend::input::{Event, InputBackend, KeyboardKeyEvent};
+use smithay::backend::input::{
+    Event,
+    InputBackend,
+    KeyboardKeyEvent,
+    KeyState,
+};
 use smithay::input::keyboard::FilterResult;
 use smithay::utils::SERIAL_COUNTER;
 
 use crate::state::MitosGuiState;
+use smithay::input::keyboard::Keysym;
 
-/// Feeds one raw key event into the seat's keyboard handle.
-///
-/// Smithay tracks keymap/modifier state internally and forwards the
-/// result to whichever surface currently has keyboard focus. There's
-/// no compositor-level keybinding table yet -- every key just passes
-/// straight through to the client. That's where Stage 4's shortcuts
-/// (raise/close/switch-workspace, etc.) hook in: they'd intercept
-/// specific keysyms here and return `FilterResult::Intercept` instead
-/// of `Forward`.
+
 pub fn handle_keyboard_key<B: InputBackend>(state: &mut MitosGuiState, event: B::KeyboardKeyEvent) {
     let Some(keyboard) = state.seat.get_keyboard() else {
         return;
@@ -30,14 +40,28 @@ pub fn handle_keyboard_key<B: InputBackend>(state: &mut MitosGuiState, event: B:
     let keycode = event.key_code();
     let key_state = event.state();
 
-    keyboard.input::<(), _>(state, keycode, key_state, serial, time, |_state, _mods, _keysym| {
+keyboard.input::<(), _>(
+    state,
+    keycode,
+    key_state,
+    serial,
+    time,
+    |state, mods, keysym| {
+        if key_state == KeyState::Pressed {
+            if mods.logo && keysym == Keysym::space {
+                toggle_launcher(state);
+
+                return FilterResult::Intercept;
+            }
+        }
+
         FilterResult::Forward
-    });
+    },
+  );
 }
 
 
 
 pub fn toggle_launcher(state: &mut MitosGuiState) {
-    state.shell.launcher_visible =
-        !state.shell.launcher_visible;
+    state.shell.toggle_launcher();
 }
