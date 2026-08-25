@@ -21,7 +21,6 @@ use smithay::backend::input::{
     InputBackend,
     PointerAxisEvent,
     PointerButtonEvent,
-    PointerMotionAbsoluteEvent,
 };
 
 use smithay::input::pointer::{
@@ -37,6 +36,8 @@ use smithay::utils::{
     Point,
     SERIAL_COUNTER,
 };
+
+use smithay::wayland::seat::WaylandFocus;
 
 use crate::state::MitosGuiState;
 
@@ -85,40 +86,37 @@ pub fn handle_pointer_motion_absolute<B: InputBackend>(
     );
 }
 
-/// Handle pointer button presses/releases.
-pub fn handle_pointer_button<B: InputBackend>(
+pub fn handle_pointer_motion_absolute<B: InputBackend>(
     state: &mut MitosGuiState,
-    event: B::PointerButtonEvent,
+    output: &Output,
+    event: B::PointerMotionAbsoluteEvent,
 ) {
+    let size = output
+        .current_mode()
+        .map(|mode| mode.size)
+        .unwrap_or_else(|| (1, 1).into());
+
+    let position = event.position();
+
+    let x = position.x * size.w as f64;
+    let y = position.y * size.h as f64;
+
+    state.pointer_location =
+        Point::<f64, Logical>::from((x, y));
+
     let Some(pointer) = state.seat.get_pointer() else {
         return;
     };
 
     let serial = SERIAL_COUNTER.next_serial();
 
-    let button = event.button_code();
+    let focus = pointer_focus(state);
 
-    let button_state = event.state();
-
-    // ------------------------------------------------------------
-    // Focus and raise the window under the pointer.
-    // ------------------------------------------------------------
-
-    if button_state == ButtonState::Pressed {
-        if let Some(window) = window_under_pointer(state) {
-            state.space.raise_element(&window, true);
-        }
-    }
-
-    // ------------------------------------------------------------
-    // Forward the button event to the pointer grab/focus.
-    // ------------------------------------------------------------
-
-    pointer.button(
+    pointer.motion(
         state,
-        &ButtonEvent {
-            button,
-            state: button_state,
+        focus,
+        &MotionEvent {
+            location: state.pointer_location,
             serial,
             time: event.time_msec(),
         },
@@ -183,8 +181,12 @@ fn pointer_focus(
 )> {
     let window = window_under_pointer(state)?;
 
+    let surface = window
+        .wl_surface()?
+        .into_owned();
+
     Some((
-        window.wl_surface().clone(),
+        surface,
         state.pointer_location,
     ))
 }
