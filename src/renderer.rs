@@ -445,13 +445,13 @@ varying vec2 v_coords;
 
 uniform vec2 size;
 
-const float RADIUS = {radius};
+const float RADIUS = {radius:.8};
 
 const vec4 GLASS_COLOR = vec4(
-    {r},
-    {g},
-    {b},
-    {a}
+    {r:.8},
+    {g:.8},
+    {b:.8},
+    {a:.8}
 );
 
 void main() {{
@@ -467,7 +467,7 @@ void main() {{
     vec2 q = abs(position - half_size)
         - (half_size - vec2(radius));
 
-    float distance = length(max(q, 0.0))
+    float distance = length(max(q, vec2(0.0)))
         + min(max(q.x, q.y), 0.0)
         - radius;
 
