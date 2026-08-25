@@ -40,6 +40,8 @@ pub struct MitosShell {
     /// Desktop dock.
     pub dock: Option<GlassPanel>,
 
+    pub dock_layout: crate::desktop::DockLayout,
+
     /// Whether the launcher is currently visible.
     pub launcher_visible: bool,
 }
@@ -52,6 +54,7 @@ impl MitosShell {
             launcher: None,
             dock: None,
             launcher_visible: false,
+            dock_layout: crate::desktop::DockLayout::default(),
         }
     }
 }
