@@ -768,6 +768,7 @@ fn collect_dock_icon_elements(
 pub fn collect_shell_elements(
     renderer: &mut GlesRenderer,
     shell: &crate::state::MitosShell,
+    dock_layout: &crate::desktop::DockLayout,
 
     top_bar_glass: &mut PixelShaderElement,
     launcher_glass: &mut PixelShaderElement,
@@ -830,15 +831,15 @@ pub fn collect_shell_elements(
 if let Some(panel) = shell.dock.as_ref() {
     elements.extend(
         collect_dock_elements(
-            panel,
-            &shell.dock_layout,
-            dock_glass,
-            top_bar_shadow,
-            top_bar_highlight,
-            top_bar_border,
-            renderer,
-            scale,
-        ),
+          panel,
+          dock_layout,
+          dock_glass,
+          top_bar_shadow,
+          top_bar_highlight,
+          top_bar_border,
+          renderer,
+          scale,
+         ),
     );
 }
 
