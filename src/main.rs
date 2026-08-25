@@ -573,7 +573,7 @@ let shell_elements =
     renderer::collect_shell_elements(
         renderer,
         &state.shell,
-        &state.dock_layout,
+        &state.shell.dock_layout,
 
         &mut top_bar_glass,
         &mut launcher_glass,
