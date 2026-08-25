@@ -1,36 +1,35 @@
-/// Feeds one raw key event into the seat's keyboard handle.
-///
-/// MITOS intercepts compositor-level shortcuts before forwarding
-/// the key to the focused Wayland client.
-///
-/// Current shortcuts:
-///
-/// - Super + Space → toggle launcher
-///
-/// Stage 4 will expand this into:
-///
-/// - Super + Q       → close window
-/// - Super + W       → move window
-/// - Super + arrows  → resize/move
-/// - Super + 1..9    → workspace switching
-/// - Super + M       → maximize
-///
-/// All other keys are forwarded normally to the focused client.
+//! Keyboard input.
+//!
+//! MITOS intercepts compositor-level shortcuts here and forwards
+//! everything else to the focused Wayland client.
 
 use smithay::backend::input::{
     Event,
     InputBackend,
-    KeyboardKeyEvent,
     KeyState,
+    KeyboardKeyEvent,
 };
-use smithay::input::keyboard::FilterResult;
+
+use smithay::input::keyboard::{
+    keysyms,
+    FilterResult,
+};
+
 use smithay::utils::SERIAL_COUNTER;
 
 use crate::state::MitosGuiState;
-use smithay::input::keyboard::Keysym;
 
-
-pub fn handle_keyboard_key<B: InputBackend>(state: &mut MitosGuiState, event: B::KeyboardKeyEvent) {
+/// Feeds one raw key event into the seat's keyboard handle.
+///
+/// Current MITOS shortcuts:
+///
+/// - Super + Space -> toggle launcher
+///
+/// Everything else is forwarded to the focused client.
+pub fn handle_keyboard_key<B: InputBackend>(
+    state: &mut MitosGuiState,
+    event: B::KeyboardKeyEvent,
+) {
     let Some(keyboard) = state.seat.get_keyboard() else {
         return;
     };
@@ -40,28 +39,34 @@ pub fn handle_keyboard_key<B: InputBackend>(state: &mut MitosGuiState, event: B:
     let keycode = event.key_code();
     let key_state = event.state();
 
-keyboard.input::<(), _>(
-    state,
-    keycode,
-    key_state,
-    serial,
-    time,
-    |state, mods, keysym| {
-        if key_state == KeyState::Pressed {
-            if mods.logo && keysym == Keysym::space {
-                toggle_launcher(state);
+    keyboard.input::<(), _>(
+        state,
+        keycode,
+        key_state,
+        serial,
+        time,
+        |state, mods, keysym| {
+            // Only trigger shortcuts when the key is pressed.
+            if key_state == KeyState::Pressed {
+                let sym = keysym.modified_sym();
 
-                return FilterResult::Intercept;
+                if mods.logo()
+                    && sym == keysyms::KEY_space
+                {
+                    toggle_launcher(state);
+
+                    return FilterResult::Intercept(());
+                }
             }
-        }
 
-        FilterResult::Forward
-    },
-  );
+            FilterResult::Forward
+        },
+    );
 }
 
-
-
-pub fn toggle_launcher(state: &mut MitosGuiState) {
+/// Toggle the MITOS application launcher.
+pub fn toggle_launcher(
+    state: &mut MitosGuiState,
+) {
     state.shell.toggle_launcher();
 }
