@@ -28,6 +28,7 @@ jobs:
             libdrm-dev \
             libegl1-mesa-dev \
             libgl1-mesa-dev \
+            libpixman-1-dev \
             libxkbcommon-dev \
             libwayland-dev \
             wayland-protocols \
