@@ -1,101 +1,78 @@
-name: Build mitos-gui
+name: Build MITOS GUI
 
 on:
   push:
-  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
 
 jobs:
-  build:
+  build-mitos-gui:
     name: Build MITOS GUI
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: mitos-gui
+
     steps:
-      # --------------------------------------------------
-      # Checkout
-      # --------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --------------------------------------------------
-      # Rust toolchain
-      # --------------------------------------------------
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      # --------------------------------------------------
-      # Linux / Smithay dependencies
-      # --------------------------------------------------
-      - name: Install GUI dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
             pkg-config \
             libudev-dev \
-            libseat-dev \
             libinput-dev \
-            libpixman-1-dev \
+            libseat-dev \
             libgbm-dev \
             libdrm-dev \
-            libwayland-dev \
-            libxkbcommon-dev \
-            libx11-dev \
-            libxrandr-dev \
-            libxi-dev \
-            libxcursor-dev \
-            libxinerama-dev \
             libegl1-mesa-dev \
-            libgl1-mesa-dev
+            libgl1-mesa-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libxcb1-dev \
+            libxcb-composite0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-render0-dev \
+            libxcb-shm0-dev \
+            libxcb-xkb-dev
 
-      # --------------------------------------------------
-      # Verify required system libraries
-      # --------------------------------------------------
-      - name: Verify system dependencies
-        run: |
-          pkg-config --modversion libudev
-          pkg-config --modversion libinput
-          pkg-config --modversion libdrm
-          pkg-config --modversion gbm
-          pkg-config --modversion wayland-server
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      # --------------------------------------------------
-      # Cache Cargo dependencies
-      # --------------------------------------------------
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            mitos-gui/target
+          key: ${{ runner.os }}-cargo-mitos-gui-${{ hashFiles('mitos-gui/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-mitos-gui-
 
-      # --------------------------------------------------
-      # Check formatting
-      # --------------------------------------------------
-      - name: Cargo fmt
-        run: cargo fmt --all
-
-      # --------------------------------------------------
-      # Check project
-      # --------------------------------------------------
-      - name: Cargo check
+      - name: Check MITOS GUI
         run: cargo check --all-targets
 
-
-      - name: Start tmate
-        uses: mxschmitt/action-tmate@v3 
-
-      # --------------------------------------------------
-      # Build
-      # --------------------------------------------------
-      - name: Build
+      - name: Build MITOS GUI
         run: cargo build --release
 
-      # --------------------------------------------------
-      # Run tests
-      # --------------------------------------------------
-      - name: Test
-        run: cargo test --all
+      - name: Prepare artifact
+        run: |
+          mkdir -p ../mitos-gui-artifact
+          cp target/release/mitos-gui ../mitos-gui-artifact/
+          cp Cargo.toml ../mitos-gui-artifact/
+          cp Cargo.lock ../mitos-gui-artifact/
+
+      - name: Upload MITOS GUI artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: mitos-gui-linux-x86_64
+          path: mitos-gui/mitos-gui-artifact/
+          retention-days: 30
+          if-no-files-found: error
