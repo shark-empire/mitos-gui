@@ -1,133 +1,145 @@
-//! Pointer input: cursor motion, clicks, and scroll -- plus the simple
-//! click-to-focus policy standing in for Stage 4's real window manager.
+//! MITOS pointer input.
+//!
+//! Stage 3:
+//! - track the compositor pointer position
+//! - find the window underneath the pointer
+//! - focus the window on button press
+//! - forward pointer events to the focused Wayland surface
+//!
+//! Stage 4 will add:
+//! - window dragging
+//! - resizing
+//! - decorations
+//! - launcher interaction
+//! - dock interaction
 
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, ButtonState, Event, InputBackend, PointerAxisEvent,
+    ButtonState,
+    Event,
+    InputBackend,
+    PointerAxisEvent,
     PointerButtonEvent,
+    PointerMotionEvent,
 };
-use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
-use smithay::output::Output;
-use smithay::utils::SERIAL_COUNTER;
-use smithay::wayland::seat::WaylandFocus;
+
+use smithay::input::pointer::{
+    AxisFrame,
+    ButtonEvent,
+    MotionEvent,
+};
+
+use smithay::utils::{
+    Logical,
+    Point,
+    SERIAL_COUNTER,
+};
 
 use crate::state::MitosGuiState;
 
-/// Handles absolute pointer motion -- the only kind of motion event
-/// winit's virtual mouse produces (it always reports a position within
-/// the window, never a relative delta).
-pub fn handle_pointer_motion_absolute<B: InputBackend>(
+/// Handle pointer motion.
+pub fn handle_pointer_motion<B: InputBackend>(
     state: &mut MitosGuiState,
-    output: &Output,
-    event: B::PointerMotionAbsoluteEvent,
+    event: B::PointerMotionEvent,
 ) {
-    let output_size = output
-        .current_mode()
-        .map(|mode| mode.size)
-        .unwrap_or_else(|| (0, 0).into());
+    let delta = event.delta();
 
-    let location = (
-        event.x_transformed(output_size.w),
-        event.y_transformed(output_size.h),
-    )
-        .into();
+    let new_location = Point::<f64, Logical> {
+        x: state.pointer_location.x + delta.0,
+        y: state.pointer_location.y + delta.1,
+    };
 
-    state.pointer_location = location;
+    state.pointer_location = new_location;
 
-    // Resolve who's under the new position *before* touching `state`
-    // mutably again below -- `element_under` borrows `state.space`,
-    // and that borrow needs to be fully resolved into owned values
-    // (not references into the Space) before `pointer.motion(state, ..)`
-    // needs `state` back.
-    let focus = state
-        .space
-        .element_under(location)
-        .and_then(|(window, window_loc)| {
-            window
-                .wl_surface()
-                .map(|surface| (surface.into_owned(), window_loc.to_f64()))
-        });
+    let Some(pointer) = state.seat.get_pointer() else {
+        return;
+    };
 
     let serial = SERIAL_COUNTER.next_serial();
+
     let time = event.time_msec();
 
-    if let Some(pointer) = state.seat.get_pointer() {
-        pointer.motion(
-            state,
-            focus,
-            &MotionEvent {
-                location,
-                serial,
-                time,
-            },
-        );
-        pointer.frame(state);
-    }
+    let under = window_under_pointer(state);
+
+    pointer.motion(
+        state,
+        under,
+        &MotionEvent {
+            location: state.pointer_location,
+            serial,
+            time,
+        },
+    );
 }
 
-/// Handles a pointer button press/release.
-///
-/// On press, this also implements click-to-focus: whatever's under the
-/// cursor gets raised to the top of the stack and takes keyboard focus.
-/// It's a stand-in for Stage 4's real window manager, which will also
-/// need to handle click-to-move/resize via the same surface-under-point
-/// lookup.
-pub fn handle_pointer_button<B: InputBackend>(state: &mut MitosGuiState, event: B::PointerButtonEvent) {
+/// Handle pointer button presses/releases.
+pub fn handle_pointer_button<B: InputBackend>(
+    state: &mut MitosGuiState,
+    event: B::PointerButtonEvent,
+) {
+    let Some(pointer) = state.seat.get_pointer() else {
+        return;
+    };
+
     let serial = SERIAL_COUNTER.next_serial();
-    let time = event.time_msec();
+
     let button = event.button_code();
-    let button_state = event.state();
 
-    if button_state == ButtonState::Pressed {
-        // Same reasoning as in the motion handler: fully resolve into
-        // an owned `Window` (cheap -- it's a ref-counted handle) before
-        // borrowing `state` mutably again for the raise/focus calls.
-        let clicked = state
-            .space
-            .element_under(state.pointer_location)
-            .map(|(window, _)| window.clone());
+    let state_button = match event.state() {
+        ButtonState::Pressed => ButtonState::Pressed,
+        ButtonState::Released => ButtonState::Released,
+    };
 
-        if let Some(window) = clicked {
+    let under = window_under_pointer(state);
+
+    // ------------------------------------------------------------
+    // Focus clicked window.
+    // ------------------------------------------------------------
+
+    if matches!(state_button, ButtonState::Pressed) {
+        if let Some(window) = under.clone() {
             state.space.raise_element(&window, true);
-
-            if let Some(surface) = window.wl_surface() {
-                if let Some(keyboard) = state.seat.get_keyboard() {
-                    keyboard.set_focus(state, Some(surface.into_owned()), serial);
-                }
-            }
         }
     }
 
-    if let Some(pointer) = state.seat.get_pointer() {
-        pointer.button(
-            state,
-            &ButtonEvent {
-                button,
-                state: button_state,
-                serial,
-                time,
-            },
-        );
-        pointer.frame(state);
-    }
+    pointer.button(
+        state,
+        &ButtonEvent {
+            button,
+            state: state_button,
+            serial,
+            time: event.time_msec(),
+        },
+    );
 }
 
-/// Handles a scroll-wheel / trackpad axis event.
-pub fn handle_pointer_axis<B: InputBackend>(state: &mut MitosGuiState, event: B::PointerAxisEvent) {
-    let time = event.time_msec();
-    let source = event.source();
+/// Handle pointer wheel/axis events.
+pub fn handle_pointer_axis<B: InputBackend>(
+    state: &mut MitosGuiState,
+    event: B::PointerAxisEvent,
+) {
+    let Some(pointer) = state.seat.get_pointer() else {
+        return;
+    };
 
-    let mut frame = AxisFrame::new(time).source(source);
+    let mut frame = AxisFrame::new(event.time_msec());
 
-    if let Some(horizontal) = event.amount(Axis::Horizontal) {
-        frame = frame.value(Axis::Horizontal, horizontal);
+    let amount = event.amount(Axis::Vertical);
+
+    if let Some(amount) = amount {
+        frame = frame.value(Axis::Vertical, amount);
     }
 
-    if let Some(vertical) = event.amount(Axis::Vertical) {
-        frame = frame.value(Axis::Vertical, vertical);
-    }
+    pointer.axis(state, frame);
+}
 
-    if let Some(pointer) = state.seat.get_pointer() {
-        pointer.axis(state, frame);
-        pointer.frame(state);
-    }
+/// Find the topmost MITOS window beneath the pointer.
+fn window_under_pointer(
+    state: &MitosGuiState,
+) -> Option<smithay::desktop::Window> {
+    state
+        .space
+        .element_under(
+            state.pointer_location,
+        )
+        .map(|(window, _location)| window.clone())
 }
