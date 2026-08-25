@@ -16,7 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: Install system dependencies & headless display tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -37,7 +37,10 @@ jobs:
             libxcb-xfixes0-dev \
             libxcb-render0-dev \
             libxcb-shm0-dev \
-            libxcb-xkb-dev
+            libxcb-xkb-dev \
+            weston \
+            xvfb \
+            imagemagick
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -59,9 +62,35 @@ jobs:
       - name: Build MITOS GUI
         run: cargo build --release
 
-      - name: Prepare artifact
+      - name: Test GUI in Headless Display & Capture Screenshot
         run: |
           mkdir -p mitos-gui-artifact
+          
+          # 1. Start a virtual display environment using Xvfb
+          Xvfb :99 -screen 0 1280x720x24 &
+          XVFB_PID=$!
+          export DISPLAY=:99
+          sleep 2
+
+          # 2. Launch Weston to provide a Wayland socket (wayland-0)
+          weston --backend=x11-backend --width=1280 --height=720 &
+          WESTON_PID=$!
+          export WAYLAND_DISPLAY=wayland-0
+          sleep 3
+
+          # 3. Execute your Linux GUI application on top of Wayland
+          ./target/release/mitos-gui &
+          APP_PID=$!
+          sleep 4
+
+          # 4. Grab a screenshot snapshot of the GUI window display
+          import -window root mitos-gui-artifact/gui-preview.png || true
+
+          # 5. Clean up background tasks
+          kill $APP_PID $WESTON_PID $XVFB_PID || true
+
+      - name: Prepare artifact
+        run: |
           cp target/release/mitos-gui mitos-gui-artifact/
           cp Cargo.toml mitos-gui-artifact/
           cp Cargo.lock mitos-gui-artifact/
