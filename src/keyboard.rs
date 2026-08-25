@@ -18,8 +18,6 @@ use smithay::input::keyboard::{
 
 use smithay::utils::SERIAL_COUNTER;
 
-use xkbcommon::xkb;
-
 use crate::state::MitosGuiState;
 
 /// Feeds one raw key event into the seat keyboard.
