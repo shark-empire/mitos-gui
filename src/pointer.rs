@@ -43,49 +43,9 @@ use crate::state::MitosGuiState;
 
 /// Handle absolute pointer motion.
 ///
-/// Winit reports the mouse position in absolute output coordinates.
-/// We convert that position directly into MITOS logical coordinates.
-pub fn handle_pointer_motion_absolute<B: InputBackend>(
-    state: &mut MitosGuiState,
-    output: &Output,
-    event: B::PointerMotionAbsoluteEvent,
-) {
-    let size = output
-        .current_mode()
-        .map(|mode| mode.size)
-        .unwrap_or_else(|| (1, 1).into());
-
-    let position = event.position();
-
-    let x = position.0 * size.w as f64;
-    let y = position.1 * size.h as f64;
-
-    state.pointer_location = Point::<f64, Logical> {
-        x,
-        y,
-    };
-
-    let Some(pointer) = state.seat.get_pointer() else {
-        return;
-    };
-
-    let serial = SERIAL_COUNTER.next_serial();
-
-    let focus = pointer_focus(state);
-
-    let motion = MotionEvent {
-        location: state.pointer_location,
-        serial,
-        time: event.time_msec(),
-    };
-
-    pointer.motion(
-        state,
-        focus,
-        &motion,
-    );
-}
-
+/// Winit reports the pointer position as a normalized
+/// coordinate in the range 0.0..=1.0. Convert it into
+/// the logical output coordinates used by MITOS.
 pub fn handle_pointer_motion_absolute<B: InputBackend>(
     state: &mut MitosGuiState,
     output: &Output,
@@ -117,6 +77,52 @@ pub fn handle_pointer_motion_absolute<B: InputBackend>(
         focus,
         &MotionEvent {
             location: state.pointer_location,
+            serial,
+            time: event.time_msec(),
+        },
+    );
+}
+
+/// Handle pointer button presses/releases.
+pub fn handle_pointer_button<B: InputBackend>(
+    state: &mut MitosGuiState,
+    event: B::PointerButtonEvent,
+) {
+    let Some(pointer) = state.seat.get_pointer() else {
+        return;
+    };
+
+    let serial = SERIAL_COUNTER.next_serial();
+
+    let button = event.button_code();
+
+    let button_state = match event.state() {
+        ButtonState::Pressed => ButtonState::Pressed,
+        ButtonState::Released => ButtonState::Released,
+    };
+
+    // Find the window underneath the pointer.
+    let under = window_under_pointer(state);
+
+    // ------------------------------------------------------------
+    // Focus the clicked window.
+    // ------------------------------------------------------------
+
+    if matches!(button_state, ButtonState::Pressed) {
+        if let Some(window) = under {
+            state.space.raise_element(&window, true);
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Forward button event to the focused surface.
+    // ------------------------------------------------------------
+
+    pointer.button(
+        state,
+        &ButtonEvent {
+            button,
+            state: button_state,
             serial,
             time: event.time_msec(),
         },
@@ -161,7 +167,7 @@ pub fn handle_pointer_axis<B: InputBackend>(
     );
 }
 
-/// Find the topmost window underneath the pointer.
+/// Find the topmost MITOS window underneath the pointer.
 fn window_under_pointer(
     state: &MitosGuiState,
 ) -> Option<smithay::desktop::Window> {
@@ -171,8 +177,8 @@ fn window_under_pointer(
         .map(|(window, _)| window.clone())
 }
 
-/// Convert the window underneath the pointer into the
-/// `WlSurface` required by `SeatHandler::PointerFocus`.
+/// Convert the window underneath the pointer into
+/// the WlSurface required by Smithay's pointer focus.
 fn pointer_focus(
     state: &MitosGuiState,
 ) -> Option<(
