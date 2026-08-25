@@ -186,11 +186,29 @@ impl MitosGuiState {
 
 
         let mut shell = MitosShell::new();
+        let output_size = output
+    .current_mode()
+    .map(|mode| {
+        smithay::utils::Size::<
+            i32,
+            smithay::utils::Logical,
+        >::from((
+            mode.size.w,
+            mode.size.h,
+        ))
+    })
+    .unwrap_or_else(|| {
+        smithay::utils::Size::<
+            i32,
+            smithay::utils::Logical,
+        >::new(1280, 720)
+    });
 
 shell.update_layout(
     &home_screen,
-    output.current_logical_size(),
+    output_size,
 );
+
         // ------------------------------------------------------------
         // Global state
         // ------------------------------------------------------------
