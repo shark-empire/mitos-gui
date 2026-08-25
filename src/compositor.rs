@@ -57,22 +57,22 @@ impl XdgShellHandler for MitosGuiState {
         &mut self.xdg_shell_state
     }
 
-    fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        println!("MITOS GUI: new application window");
+  fn new_toplevel(&mut self, surface: ToplevelSurface) {
+    println!("MITOS GUI: new application window");
 
-        // The initial configure just tells the client its surface is
-        // ready to be mapped; actual size negotiation happens once it
-        // commits a buffer.
-        surface.send_configure();
+    surface.with_pending_state(|state| {
+        state.states.set(
+            smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State::Activated
+        );
+    });
 
-        let window = Window::new(surface);
-        let position = next_window_position(&self.space);
+    surface.send_configure();
 
-        // `activate: true` marks this window active and clears the
-        // Activated state from every other mapped window, so we don't
-        // need to touch xdg_toplevel state by hand here.
-        self.space.map_element(window, position, true);
-    }
+    let window = Window::new_wayland_window(surface);
+    let position = next_window_position(&self.space);
+
+    self.space.map_element(window, position, true);
+}
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         println!("MITOS GUI: application window closed");
