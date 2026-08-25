@@ -569,10 +569,11 @@ if let Some(panel) = state.shell.dock {
                     // renderer.rs owns the actual panel rendering.
                     //
 
-     let shell_elements =
+let shell_elements =
     renderer::collect_shell_elements(
         renderer,
         &state.shell,
+        &state.dock_layout,
 
         &mut top_bar_glass,
         &mut launcher_glass,
