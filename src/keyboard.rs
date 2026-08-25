@@ -2,8 +2,8 @@
 //!
 //! Stage 3 keyboard handling:
 //! - forward normal keys to the focused Wayland client
-//! - intercept Super + Space
-//! - toggle the MITOS launcher
+//! - launcher shortcut handling will be added through the
+//!   Smithay 0.7 keysym API.
 
 use smithay::backend::input::{
     Event,
@@ -11,16 +11,13 @@ use smithay::backend::input::{
     KeyboardKeyEvent,
 };
 
-use smithay::input::keyboard::{
-    FilterResult,
-    KeysymHandle,
-};
+use smithay::input::keyboard::FilterResult;
 
 use smithay::utils::SERIAL_COUNTER;
 
 use crate::state::MitosGuiState;
 
-/// Feeds one raw key event into the seat keyboard.
+/// Feed one raw keyboard event into the MITOS seat.
 pub fn handle_keyboard_key<B: InputBackend>(
     state: &mut MitosGuiState,
     event: B::KeyboardKeyEvent,
@@ -40,42 +37,13 @@ pub fn handle_keyboard_key<B: InputBackend>(
         key_state,
         serial,
         time,
-        |state, mods, sym| {
-            // --------------------------------------------------------
-            // MITOS launcher shortcut
-            //
-            // Super + Space
-            // --------------------------------------------------------
-
-            if mods.logo
-                && sym.modified_sym()
-                    == xkb::KEY_space
-            {
-                state.shell.launcher_visible =
-                    !state.shell.launcher_visible;
-
-                tracing::info!(
-                    "MITOS: launcher {}",
-                    if state.shell.launcher_visible {
-                        "opened"
-                    } else {
-                        "closed"
-                    }
-                );
-
-                return FilterResult::Intercept(());
-            }
-
-            // --------------------------------------------------------
-            // Everything else goes to the focused client.
-            // --------------------------------------------------------
-
+        |_state, _mods, _sym| {
             FilterResult::Forward
         },
     );
 }
 
-/// Toggle the MITOS launcher programmatically.
+/// Toggle the MITOS launcher.
 pub fn toggle_launcher(
     state: &mut MitosGuiState,
 ) {
