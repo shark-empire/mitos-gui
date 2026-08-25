@@ -2,8 +2,7 @@
 //!
 //! Stage 3 keyboard handling:
 //! - forward normal keys to the focused Wayland client
-//! - launcher shortcut handling will be added through the
-//!   Smithay 0.7 keysym API.
+//! - Super + Space toggles the MITOS launcher
 
 use smithay::backend::input::{
     Event,
@@ -11,7 +10,10 @@ use smithay::backend::input::{
     KeyboardKeyEvent,
 };
 
-use smithay::input::keyboard::FilterResult;
+use smithay::input::keyboard::{
+    keysyms,
+    FilterResult,
+};
 
 use smithay::utils::SERIAL_COUNTER;
 
@@ -37,13 +39,40 @@ pub fn handle_keyboard_key<B: InputBackend>(
         key_state,
         serial,
         time,
-        |_state, _mods, _sym| {
+        |state, mods, sym| {
+            let keysym = sym.modified_sym();
+
+            // --------------------------------------------------------
+            // MITOS launcher shortcut
+            //
+            // Super + Space
+            // --------------------------------------------------------
+
+            if mods.logo && keysym == keysyms::KEY_space.into() {
+                state.shell.toggle_launcher();
+
+                tracing::info!(
+                    "MITOS: launcher {}",
+                    if state.shell.launcher_visible {
+                        "opened"
+                    } else {
+                        "closed"
+                    }
+                );
+
+                return FilterResult::Intercept(());
+            }
+
+            // --------------------------------------------------------
+            // Normal keyboard input
+            // --------------------------------------------------------
+
             FilterResult::Forward
         },
     );
 }
 
-/// Toggle the MITOS launcher.
+/// Toggle the MITOS launcher programmatically.
 pub fn toggle_launcher(state: &mut MitosGuiState) {
     state.shell.toggle_launcher();
 }
