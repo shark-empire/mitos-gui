@@ -1,31 +1,28 @@
 //! Keyboard input.
 //!
-//! MITOS intercepts compositor-level shortcuts here and forwards
-//! everything else to the focused Wayland client.
+//! Stage 3 keyboard handling:
+//! - forward normal keys to the focused Wayland client
+//! - intercept Super + Space
+//! - toggle the MITOS launcher
 
 use smithay::backend::input::{
     Event,
     InputBackend,
-    KeyState,
     KeyboardKeyEvent,
 };
 
 use smithay::input::keyboard::{
-    keysyms,
     FilterResult,
+    KeysymHandle,
 };
 
 use smithay::utils::SERIAL_COUNTER;
 
+use xkbcommon::xkb;
+
 use crate::state::MitosGuiState;
 
-/// Feeds one raw key event into the seat's keyboard handle.
-///
-/// Current MITOS shortcuts:
-///
-/// - Super + Space -> toggle launcher
-///
-/// Everything else is forwarded to the focused client.
+/// Feeds one raw key event into the seat keyboard.
 pub fn handle_keyboard_key<B: InputBackend>(
     state: &mut MitosGuiState,
     event: B::KeyboardKeyEvent,
@@ -40,27 +37,50 @@ pub fn handle_keyboard_key<B: InputBackend>(
     let key_state = event.state();
 
     keyboard.input::<(), _>(
-    state,
-    keycode,
-    key_state,
-    serial,
-    time,
-    |state, mods, sym| {
-        if mods.logo && sym == keysyms::KEY_space.into() {
-            state.shell.launcher_visible =
-                !state.shell.launcher_visible;
+        state,
+        keycode,
+        key_state,
+        serial,
+        time,
+        |state, mods, sym| {
+            // --------------------------------------------------------
+            // MITOS launcher shortcut
+            //
+            // Super + Space
+            // --------------------------------------------------------
 
-            return FilterResult::Intercept(());
-        }
+            if mods.logo
+                && sym.modified_sym()
+                    == xkb::KEY_space
+            {
+                state.shell.launcher_visible =
+                    !state.shell.launcher_visible;
 
-        FilterResult::Forward
-    },
-);
+                tracing::info!(
+                    "MITOS: launcher {}",
+                    if state.shell.launcher_visible {
+                        "opened"
+                    } else {
+                        "closed"
+                    }
+                );
+
+                return FilterResult::Intercept(());
+            }
+
+            // --------------------------------------------------------
+            // Everything else goes to the focused client.
+            // --------------------------------------------------------
+
+            FilterResult::Forward
+        },
+    );
 }
 
-/// Toggle the MITOS application launcher.
+/// Toggle the MITOS launcher programmatically.
 pub fn toggle_launcher(
     state: &mut MitosGuiState,
 ) {
-    state.shell.toggle_launcher();
+    state.shell.launcher_visible =
+        !state.shell.launcher_visible;
 }
