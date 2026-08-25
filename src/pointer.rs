@@ -14,12 +14,14 @@
 //! - dock interaction
 
 use smithay::backend::input::{
+    AbsolutePositionEvent,
+    Axis,
     ButtonState,
     Event,
     InputBackend,
     PointerAxisEvent,
     PointerButtonEvent,
-    PointerMotionEvent,
+    PointerMotionAbsoluteEvent,
 };
 
 use smithay::input::pointer::{
@@ -27,6 +29,8 @@ use smithay::input::pointer::{
     ButtonEvent,
     MotionEvent,
 };
+
+use smithay::output::Output;
 
 use smithay::utils::{
     Logical,
@@ -36,19 +40,29 @@ use smithay::utils::{
 
 use crate::state::MitosGuiState;
 
-/// Handle pointer motion.
-pub fn handle_pointer_motion<B: InputBackend>(
+/// Handle absolute pointer motion.
+///
+/// Winit reports the mouse position in absolute output coordinates.
+/// We convert that position directly into MITOS logical coordinates.
+pub fn handle_pointer_motion_absolute<B: InputBackend>(
     state: &mut MitosGuiState,
-    event: B::PointerMotionEvent,
+    output: &Output,
+    event: B::PointerMotionAbsoluteEvent,
 ) {
-    let delta = event.delta();
+    let size = output
+        .current_mode()
+        .map(|mode| mode.size)
+        .unwrap_or_else(|| (1, 1).into());
 
-    let new_location = Point::<f64, Logical> {
-        x: state.pointer_location.x + delta.0,
-        y: state.pointer_location.y + delta.1,
+    let position = event.position();
+
+    let x = position.0 * size.w as f64;
+    let y = position.1 * size.h as f64;
+
+    state.pointer_location = Point::<f64, Logical> {
+        x,
+        y,
     };
-
-    state.pointer_location = new_location;
 
     let Some(pointer) = state.seat.get_pointer() else {
         return;
@@ -56,18 +70,18 @@ pub fn handle_pointer_motion<B: InputBackend>(
 
     let serial = SERIAL_COUNTER.next_serial();
 
-    let time = event.time_msec();
+    let focus = pointer_focus(state);
 
-    let under = window_under_pointer(state);
+    let motion = MotionEvent {
+        location: state.pointer_location,
+        serial,
+        time: event.time_msec(),
+    };
 
     pointer.motion(
         state,
-        under,
-        &MotionEvent {
-            location: state.pointer_location,
-            serial,
-            time,
-        },
+        focus,
+        &motion,
     );
 }
 
@@ -84,28 +98,27 @@ pub fn handle_pointer_button<B: InputBackend>(
 
     let button = event.button_code();
 
-    let state_button = match event.state() {
-        ButtonState::Pressed => ButtonState::Pressed,
-        ButtonState::Released => ButtonState::Released,
-    };
-
-    let under = window_under_pointer(state);
+    let button_state = event.state();
 
     // ------------------------------------------------------------
-    // Focus clicked window.
+    // Focus and raise the window under the pointer.
     // ------------------------------------------------------------
 
-    if matches!(state_button, ButtonState::Pressed) {
-        if let Some(window) = under.clone() {
+    if button_state == ButtonState::Pressed {
+        if let Some(window) = window_under_pointer(state) {
             state.space.raise_element(&window, true);
         }
     }
+
+    // ------------------------------------------------------------
+    // Forward the button event to the pointer grab/focus.
+    // ------------------------------------------------------------
 
     pointer.button(
         state,
         &ButtonEvent {
             button,
-            state: state_button,
+            state: button_state,
             serial,
             time: event.time_msec(),
         },
@@ -121,25 +134,57 @@ pub fn handle_pointer_axis<B: InputBackend>(
         return;
     };
 
-    let mut frame = AxisFrame::new(event.time_msec());
+    let mut frame =
+        AxisFrame::new(event.time_msec());
 
-    let amount = event.amount(Axis::Vertical);
-
-    if let Some(amount) = amount {
-        frame = frame.value(Axis::Vertical, amount);
+    if let Some(value) =
+        event.amount(Axis::Vertical)
+    {
+        frame =
+            frame.value(
+                Axis::Vertical,
+                value,
+            );
     }
 
-    pointer.axis(state, frame);
+    if let Some(value) =
+        event.amount(Axis::Horizontal)
+    {
+        frame =
+            frame.value(
+                Axis::Horizontal,
+                value,
+            );
+    }
+
+    pointer.axis(
+        state,
+        frame,
+    );
 }
 
-/// Find the topmost MITOS window beneath the pointer.
+/// Find the topmost window underneath the pointer.
 fn window_under_pointer(
     state: &MitosGuiState,
 ) -> Option<smithay::desktop::Window> {
     state
         .space
-        .element_under(
-            state.pointer_location,
-        )
-        .map(|(window, _location)| window.clone())
+        .element_under(state.pointer_location)
+        .map(|(window, _)| window.clone())
+}
+
+/// Convert the window underneath the pointer into the
+/// `WlSurface` required by `SeatHandler::PointerFocus`.
+fn pointer_focus(
+    state: &MitosGuiState,
+) -> Option<(
+    smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+    Point<f64, Logical>,
+)> {
+    let window = window_under_pointer(state)?;
+
+    Some((
+        window.wl_surface().clone(),
+        state.pointer_location,
+    ))
 }
