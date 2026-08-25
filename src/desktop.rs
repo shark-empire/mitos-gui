@@ -342,7 +342,58 @@ impl ShellLayout {
             None
         };
 
-        // ============================================================================
+       
+// ------------------------------------------------------------
+// Dock
+//
+// Floating glass dock centered horizontally near the bottom.
+// ------------------------------------------------------------
+
+let dock = if config.dock {
+    let dock_height = config
+        .dock_height
+        .max(64.0)
+        .min(height as f32)
+        .round() as i32;
+
+    let dock_width = ((width as f32) * 0.55)
+        .max(360.0)
+        .min(width as f32 - 32.0)
+        .max(1.0)
+        .round() as i32;
+
+    let bottom_margin = 20;
+
+    let x = ((width - dock_width) / 2).max(0);
+
+    let y = (height - dock_height - bottom_margin).max(0);
+
+    Some(GlassPanel {
+        position: (x, y),
+        size: (dock_width, dock_height),
+        radius: MitosTheme::PANEL_RADIUS,
+        tint: crate::renderer::glass_color(),
+        border: Color32F::new(
+            MitosTheme::BORDER.r,
+            MitosTheme::BORDER.g,
+            MitosTheme::BORDER.b,
+            MitosTheme::BORDER.a,
+        ),
+    })
+} else {
+    None
+};
+
+        Self {
+            top_bar,
+            launcher,
+            dock,
+        }
+    }
+}
+
+
+ // ============================================================================
 // DOCK
 // ============================================================================
 
@@ -420,55 +471,6 @@ impl Default for DockLayout {
         }
     }
 }
-// ------------------------------------------------------------
-// Dock
-//
-// Floating glass dock centered horizontally near the bottom.
-// ------------------------------------------------------------
-
-let dock = if config.dock {
-    let dock_height = config
-        .dock_height
-        .max(64.0)
-        .min(height as f32)
-        .round() as i32;
-
-    let dock_width = ((width as f32) * 0.55)
-        .max(360.0)
-        .min(width as f32 - 32.0)
-        .max(1.0)
-        .round() as i32;
-
-    let bottom_margin = 20;
-
-    let x = ((width - dock_width) / 2).max(0);
-
-    let y = (height - dock_height - bottom_margin).max(0);
-
-    Some(GlassPanel {
-        position: (x, y),
-        size: (dock_width, dock_height),
-        radius: MitosTheme::PANEL_RADIUS,
-        tint: crate::renderer::glass_color(),
-        border: Color32F::new(
-            MitosTheme::BORDER.r,
-            MitosTheme::BORDER.g,
-            MitosTheme::BORDER.b,
-            MitosTheme::BORDER.a,
-        ),
-    })
-} else {
-    None
-};
-
-        Self {
-            top_bar,
-            launcher,
-            dock,
-        }
-    }
-}
-
 
 
 // ============================================================================
