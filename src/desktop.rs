@@ -342,36 +342,81 @@ impl ShellLayout {
             None
         };
 
-        // ------------------------------------------------------------
-        // Dock
-        //
-        // Centered horizontally at the bottom of the screen.
-        // ------------------------------------------------------------
+        // ============================================================================
+// DOCK
+// ============================================================================
 
-        #[derive(Clone, Copy, Debug)]
+/// An application represented by a dock icon.
+#[derive(Clone, Debug)]
 pub struct DockItem {
+    /// Stable identifier used by input handling.
     pub id: &'static str,
+
+    /// Human-readable application name.
+    pub name: &'static str,
+
+    /// Whether this application is currently running.
+    pub running: bool,
+
+    /// Whether this item is currently selected.
+    pub active: bool,
 }
 
+/// Layout information for the MITOS dock.
 #[derive(Clone, Debug)]
 pub struct DockLayout {
+    /// Applications displayed in the dock.
     pub items: Vec<DockItem>,
+
+    /// Size of each icon.
     pub icon_size: i32,
+
+    /// Space between icons.
     pub spacing: i32,
+
+    /// Horizontal padding inside the glass panel.
+    pub padding: i32,
 }
 
-        impl DockLayout {
-    pub fn default() -> Self {
+impl Default for DockLayout {
+    fn default() -> Self {
         Self {
             items: vec![
-                DockItem { id: "launcher" },
-                DockItem { id: "files" },
-                DockItem { id: "terminal" },
-                DockItem { id: "browser" },
-                DockItem { id: "settings" },
+                DockItem {
+                    id: "launcher",
+                    name: "Launcher",
+                    running: false,
+                    active: false,
+                },
+                DockItem {
+                    id: "files",
+                    name: "Files",
+                    running: false,
+                    active: false,
+                },
+                DockItem {
+                    id: "terminal",
+                    name: "Terminal",
+                    running: false,
+                    active: false,
+                },
+                DockItem {
+                    id: "browser",
+                    name: "Browser",
+                    running: false,
+                    active: false,
+                },
+                DockItem {
+                    id: "settings",
+                    name: "Settings",
+                    running: false,
+                    active: false,
+                },
             ],
-            icon_size: 48,
+
+            icon_size: 44,
             spacing: 12,
+            padding: 18,
         }
     }
 }
