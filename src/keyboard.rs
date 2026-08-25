@@ -40,28 +40,22 @@ pub fn handle_keyboard_key<B: InputBackend>(
     let key_state = event.state();
 
     keyboard.input::<(), _>(
-        state,
-        keycode,
-        key_state,
-        serial,
-        time,
-        |state, mods, keysym| {
-            // Only trigger shortcuts when the key is pressed.
-            if key_state == KeyState::Pressed {
-                let sym = keysym.modified_sym();
+    state,
+    keycode,
+    key_state,
+    serial,
+    time,
+    |state, mods, sym| {
+        if mods.logo && sym == keysyms::KEY_space.into() {
+            state.shell.launcher_visible =
+                !state.shell.launcher_visible;
 
-                if mods.logo()
-                    && sym == keysyms::KEY_space
-                {
-                    toggle_launcher(state);
+            return FilterResult::Intercept(());
+        }
 
-                    return FilterResult::Intercept(());
-                }
-            }
-
-            FilterResult::Forward
-        },
-    );
+        FilterResult::Forward
+    },
+);
 }
 
 /// Toggle the MITOS application launcher.
