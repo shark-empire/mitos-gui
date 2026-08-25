@@ -804,42 +804,42 @@ pub fn collect_shell_elements(
         );
     }
 
-    // ------------------------------------------------------------
-    // LAUNCHER
-    // ------------------------------------------------------------
+ // ------------------------------------------------------------
+// LAUNCHER
+// ------------------------------------------------------------
 
-    if shell.launcher_visible {
-        if let Some(panel) = shell.launcher.as_ref() {
-            elements.extend(
-                collect_launcher_elements(
-                    panel,
-                    launcher_glass,
-                    top_bar_shadow,
-                    top_bar_highlight,
-                    top_bar_border,
-                    renderer,
-                    scale,
-                ),
-            );
-        }
+if shell.launcher_visible {
+    if let Some(panel) = shell.launcher.as_ref() {
+        elements.extend(
+            collect_launcher_elements(
+                panel,
+                launcher_glass,
+                top_bar_shadow,
+                top_bar_highlight,
+                top_bar_border,
+                renderer,
+                scale,
+            ),
+        );
     }
+}
 
-    // ------------------------------------------------------------
-    // DOCK
-    // ------------------------------------------------------------
+// ------------------------------------------------------------
+// DOCK
+// ------------------------------------------------------------
 
 if let Some(panel) = shell.dock.as_ref() {
     elements.extend(
         collect_dock_elements(
-          panel,
-          dock_layout,
-          dock_glass,
-          top_bar_shadow,
-          top_bar_highlight,
-          top_bar_border,
-          renderer,
-          scale,
-         ),
+            panel,
+            dock_layout,
+            dock_glass,
+            dock_shadow,
+            dock_highlight,
+            dock_border,
+            renderer,
+            scale,
+        ),
     );
 }
 
