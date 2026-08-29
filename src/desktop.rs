@@ -29,7 +29,7 @@ use crate::theme::{Color, MitosTheme};
 // ============================================================================
 
 /// Configuration for the MITOS home screen.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct HomeScreenConfig {
     /// Desktop background color.
     pub background: Color,
@@ -54,6 +54,21 @@ pub struct HomeScreenConfig {
 
     /// Launcher height in logical pixels.
     pub launcher_height: f32,
+
+    /// "light" or "dark".
+    pub theme_mode: String,
+
+    /// Optional accent override.
+    pub accent_color: Option<Color>,
+
+    /// Optional glass opacity override (0.0..=1.0).
+    pub glass_opacity: Option<f32>,
+
+    /// Optional panel radius override.
+    pub panel_radius: Option<f32>,
+
+    /// Optional wallpaper path override.
+    pub wallpaper_path: Option<String>,
 }
 
 impl Default for HomeScreenConfig {
@@ -71,6 +86,12 @@ impl Default for HomeScreenConfig {
 
             launcher_width: 720.0,
             launcher_height: 520.0,
+
+            theme_mode: "dark".to_string(),
+            accent_color: None,
+            glass_opacity: None,
+            panel_radius: None,
+            wallpaper_path: None,
         }
     }
 }
@@ -98,6 +119,8 @@ impl HomeScreenConfig {
             return config;
         };
 
+        let mut saw_background = false;
+
         for (line_no, line) in contents.lines().enumerate() {
             let line = line.trim();
 
@@ -124,7 +147,10 @@ impl HomeScreenConfig {
                 // --------------------------------------------------------
 
                 "background" => match parse_hex_color(value) {
-                    Some(color) => config.background = color,
+                    Some(color) => {
+                        config.background = color;
+                        saw_background = true;
+                    }
 
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: invalid color {value:?}, keeping default",
@@ -232,6 +258,57 @@ impl HomeScreenConfig {
                 }
 
                 // --------------------------------------------------------
+                // Shared MITOS Config (Theme & Live Reload)
+                // --------------------------------------------------------
+
+                "theme_mode" => {
+                    if value == "light" || value == "dark" {
+                        config.theme_mode = value.to_string();
+                    } else {
+                        tracing::warn!(
+                            "MITOS GUI: {}:{}: invalid theme_mode {value:?}, expected `light` or `dark`",
+                            path.display(),
+                            line_no + 1,
+                        );
+                    }
+                }
+
+                "accent_color" => match parse_hex_color(value) {
+                    Some(color) => config.accent_color = Some(color),
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: invalid accent color {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "glass_opacity" => match value.parse::<f32>() {
+                    Ok(v) if v.is_finite() && (0.0..=1.0).contains(&v) => {
+                        config.glass_opacity = Some(v);
+                    }
+                    _ => tracing::warn!(
+                        "MITOS GUI: {}:{}: invalid glass opacity {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "panel_radius" => match parse_positive_f32(value) {
+                    Some(v) => config.panel_radius = Some(v),
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: invalid panel radius {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "wallpaper" => {
+                    if !value.is_empty() {
+                        config.wallpaper_path = Some(value.to_string());
+                    }
+                }
+
+                // --------------------------------------------------------
                 // Unknown
                 // --------------------------------------------------------
 
@@ -241,6 +318,11 @@ impl HomeScreenConfig {
                     line_no + 1,
                 ),
             }
+        }
+
+        // Light mode without an explicit background gets a light desktop.
+        if config.theme_mode == "light" && !saw_background {
+            config.background = Color::rgba(0.96, 0.97, 0.98, 1.0);
         }
 
         println!(
@@ -329,14 +411,14 @@ impl ShellLayout {
             Some(GlassPanel {
                 position: (x, y),
                 size: (launcher_width, launcher_height),
-                radius: MitosTheme::PANEL_RADIUS,
+                radius: MitosTheme::effective_panel_radius(),
                 tint: crate::renderer::glass_color(),
- border: Color32F::new(
-    MitosTheme::BORDER.r,
-    MitosTheme::BORDER.g,
-    MitosTheme::BORDER.b,
-    MitosTheme::BORDER.a,
-),
+                border: Color32F::new(
+                    MitosTheme::BORDER.r,
+                    MitosTheme::BORDER.g,
+                    MitosTheme::BORDER.b,
+                    MitosTheme::BORDER.a,
+                ),
             })
         } else {
             None
@@ -371,7 +453,7 @@ let dock = if config.dock {
     Some(GlassPanel {
         position: (x, y),
         size: (dock_width, dock_height),
-        radius: MitosTheme::PANEL_RADIUS,
+        radius: MitosTheme::effective_panel_radius(),
         tint: crate::renderer::glass_color(),
         border: Color32F::new(
             MitosTheme::BORDER.r,
