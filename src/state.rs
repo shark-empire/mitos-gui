@@ -78,10 +78,9 @@ impl MitosShell {
     }
 
     /// Toggle the launcher visibility.
-   /// Toggle the launcher visibility.
-pub fn toggle_launcher(&mut self) {
-    self.launcher_visible = !self.launcher_visible;
-}
+    pub fn toggle_launcher(&mut self) {
+        self.launcher_visible = !self.launcher_visible;
+    }
 }
 
 // ============================================================================
@@ -159,6 +158,10 @@ pub struct MitosGuiState {
 
     /// Monotonic compositor clock.
     pub clock: Clock<Monotonic>,
+
+    /// Set by the config watcher; consumed by the main loop to force
+    /// a full redraw and shader recompile after a live config reload.
+    pub pending_full_redraw: bool,
 }
 
 impl MitosGuiState {
@@ -184,54 +187,82 @@ impl MitosGuiState {
 
         space.map_output(&output, (0, 0));
 
-
         let mut shell = MitosShell::new();
         let output_size = output
-    .current_mode()
-    .map(|mode| {
-        smithay::utils::Size::<
-            i32,
-            smithay::utils::Logical,
-        >::from((
-            mode.size.w,
-            mode.size.h,
-        ))
-    })
-    .unwrap_or_else(|| {
-        smithay::utils::Size::<
-            i32,
-            smithay::utils::Logical,
-        >::new(1280, 720)
-    });
+            .current_mode()
+            .map(|mode| {
+                smithay::utils::Size::<
+                    i32,
+                    smithay::utils::Logical,
+                >::from((
+                    mode.size.w,
+                    mode.size.h,
+                ))
+            })
+            .unwrap_or_else(|| {
+                smithay::utils::Size::<
+                    i32,
+                    smithay::utils::Logical,
+                >::new(1280, 720)
+            });
 
-shell.update_layout(
-    &home_screen,
-    output_size,
-);
+        shell.update_layout(
+            &home_screen,
+            output_size,
+        );
 
         // ------------------------------------------------------------
         // Global state
         // ------------------------------------------------------------
 
- Self {
-    compositor_state,
-    xdg_shell_state,
-    shm_state,
+        Self {
+            compositor_state,
+            xdg_shell_state,
+            shm_state,
 
-    seat_state,
-    seat,
+            seat_state,
+            seat,
 
-    shell,
+            shell,
 
-    output,
+            output,
 
-    home_screen,
-    space,
-    popups: PopupManager::default(),
+            home_screen,
+            space,
+            popups: PopupManager::default(),
 
-    pointer_location: (0.0, 0.0).into(),
-    clock: Clock::new(),
-      }
+            pointer_location: (0.0, 0.0).into(),
+            clock: Clock::new(),
+            pending_full_redraw: false,
+        }
+    }
+
+    /// Reload ~/.config/mitos/home.conf and recompute the shell.
+    ///
+    /// Called from the config-watcher channel when the file changes.
+    pub fn reload_configuration(&mut self) {
+        println!("MITOS GUI: home.conf changed, reloading configuration");
+
+        self.home_screen = HomeScreenConfig::load();
+
+        crate::theme::MitosTheme::apply_runtime(&self.home_screen);
+
+        let output_size = self
+            .output
+            .current_mode()
+            .map(|mode| {
+                smithay::utils::Size::<i32, smithay::utils::Logical>::from((
+                    mode.size.w,
+                    mode.size.h,
+                ))
+            })
+            .unwrap_or_else(|| {
+                smithay::utils::Size::<i32, smithay::utils::Logical>::new(1280, 720)
+            });
+
+        self.shell.update_layout(&self.home_screen, output_size);
+
+        self.pending_full_redraw = true;
     }
 }
 
