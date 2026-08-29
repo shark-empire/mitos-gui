@@ -1,5 +1,6 @@
 mod animation;
 mod compositor;
+mod config_watcher;
 mod desktop;
 mod input;
 mod keyboard;
@@ -71,6 +72,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EventLoop::try_new()?;
 
     // ============================================================
+    // LIVE CONFIG RELOAD (inotify)
+    // ============================================================
+
+    let (config_tx, config_rx) =
+        calloop::channel::channel::<config_watcher::ConfigChanged>();
+
+    // Keep one sender alive so the channel never closes,
+    // even if the watcher fails to start.
+    let _config_keepalive = config_tx.clone();
+
+    // IMPORTANT: bind to a named variable.
+    // `let _ = ...` would drop the watcher immediately and kill inotify.
+    let _config_watcher = config_watcher::ConfigWatcher::start(config_tx);
+
+    event_loop
+        .handle()
+        .insert_source(config_rx, |event, _metadata, state| {
+            if let calloop::channel::Event::Msg(_) = event {
+                state.reload_configuration();
+            }
+        })
+        .expect("MITOS GUI: failed to register config channel");
+
+    // ============================================================
     // WAYLAND DISPLAY
     // ============================================================
 
@@ -95,23 +120,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut backend, mut winit_event_loop) =
         winit::init::<GlesRenderer>()?;
 
-        println!(
+    println!(
         "MITOS GUI: GLES renderer initialized (winit backend)"
     );
 
     // ============================================================
-// WALLPAPER
-// ============================================================
+    // WALLPAPER
+    // ============================================================
 
-let wallpaper =
-    renderer::Wallpaper::load_default()
-        .map_err(|err| {
-            format!(
-                "MITOS GUI: {err}"
-            )
-        })?;
-
-
+    let mut wallpaper =
+        renderer::Wallpaper::load_default()
+            .map_err(|err| {
+                format!(
+                    "MITOS GUI: {err}"
+                )
+            })?;
 
     // ============================================================
     // WAYLAND COMPOSITOR
@@ -169,12 +192,12 @@ let wallpaper =
         refresh: 60_000,
     };
 
- output.change_current_state(
-    Some(mode),
-    Some(Transform::Normal),
-    None,
-    Some((0, 0).into()),
-);
+    output.change_current_state(
+        Some(mode),
+        Some(Transform::Normal),
+        None,
+        Some((0, 0).into()),
+    );
 
     output.set_preferred(mode);
 
@@ -215,6 +238,9 @@ let wallpaper =
 
     let home_screen =
         desktop::HomeScreenConfig::load();
+
+    // Apply initial runtime theme overrides
+    theme::MitosTheme::apply_runtime(&home_screen);
 
     // ============================================================
     // MITOS STATE
@@ -288,35 +314,35 @@ let wallpaper =
         );
 
     // ============================================================
-// DOCK GPU BUFFERS
-// ============================================================
+    // DOCK GPU BUFFERS
+    // ============================================================
 
-let mut dock_shadow_buffer =
-    SolidColorBuffer::new(
-        (0, 0),
-        renderer::shadow_color(),
-    );
+    let mut dock_shadow_buffer =
+        SolidColorBuffer::new(
+            (0, 0),
+            renderer::shadow_color(),
+        );
 
-let mut dock_highlight_buffer =
-    SolidColorBuffer::new(
-        (0, 0),
-        renderer::glass_highlight_color(),
-    );
+    let mut dock_highlight_buffer =
+        SolidColorBuffer::new(
+            (0, 0),
+            renderer::glass_highlight_color(),
+        );
 
-let mut dock_border_buffer =
-    SolidColorBuffer::new(
-        (0, 0),
-        {
-            let c = theme::MitosTheme::BORDER;
+    let mut dock_border_buffer =
+        SolidColorBuffer::new(
+            (0, 0),
+            {
+                let c = theme::MitosTheme::BORDER;
 
-            smithay::backend::renderer::Color32F::new(
-                c.r,
-                c.g,
-                c.b,
-                c.a,
-            )
-        },
-    );
+                smithay::backend::renderer::Color32F::new(
+                    c.r,
+                    c.g,
+                    c.b,
+                    c.a,
+                )
+            },
+        );
 
     // ============================================================
     // GLASS SHADERS
@@ -454,6 +480,40 @@ let mut dock_border_buffer =
         }
 
         // ========================================================
+        // LIVE CONFIG RELOAD
+        // ========================================================
+
+        if state.pending_full_redraw {
+            state.pending_full_redraw = false;
+            full_redraw_frames = 4;
+
+            // Recompile the glass shaders with the new theme values.
+            if let Ok(glass) =
+                renderer::create_glass_panel_element(backend.renderer())
+            {
+                top_bar_glass = glass;
+            }
+            if let Ok(glass) =
+                renderer::create_glass_panel_element(backend.renderer())
+            {
+                launcher_glass = glass;
+            }
+            if let Ok(glass) =
+                renderer::create_glass_panel_element(backend.renderer())
+            {
+                dock_glass = glass;
+            }
+
+            // Swap wallpaper if home.conf points to a new one.
+            if let Some(wp_path) = state.home_screen.wallpaper_path.clone() {
+                match renderer::Wallpaper::load_from_path(&wp_path) {
+                    Ok(wp) => wallpaper = wp,
+                    Err(err) => tracing::warn!("MITOS GUI: {err}"),
+                }
+            }
+        }
+
+        // ========================================================
         // BUFFER AGE
         // ========================================================
 
@@ -522,38 +582,35 @@ let mut dock_border_buffer =
             state.shell.top_bar = None;
         }
 
-
-
-
         // ============================================================
-// DOCK GPU RESOURCES
-// ============================================================
+        // DOCK GPU RESOURCES
+        // ============================================================
 
-if let Some(panel) = state.shell.dock {
-    let width = panel.size.0;
+        if let Some(panel) = state.shell.dock {
+            let width = panel.size.0;
 
-    dock_shadow_buffer.update(
-        (width, 12),
-        renderer::shadow_color(),
-    );
+            dock_shadow_buffer.update(
+                (width, 12),
+                renderer::shadow_color(),
+            );
 
-    dock_highlight_buffer.update(
-        (width, 2),
-        renderer::glass_highlight_color(),
-    );
+            dock_highlight_buffer.update(
+                (width, 2),
+                renderer::glass_highlight_color(),
+            );
 
-    let border = theme::MitosTheme::BORDER;
+            let border = theme::MitosTheme::BORDER;
 
-    dock_border_buffer.update(
-        (width, 1),
-        smithay::backend::renderer::Color32F::new(
-            border.r,
-            border.g,
-            border.b,
-            border.a,
-        ),
-    );
-}
+            dock_border_buffer.update(
+                (width, 1),
+                smithay::backend::renderer::Color32F::new(
+                    border.r,
+                    border.g,
+                    border.b,
+                    border.a,
+                ),
+            );
+        }
         
         // ========================================================
         // DRAW FRAME
@@ -569,51 +626,51 @@ if let Some(panel) = state.shell.dock {
                     // renderer.rs owns the actual panel rendering.
                     //
 
-let shell_elements =
-    renderer::collect_shell_elements(
-        renderer,
-        &state.shell,
-        &state.shell.dock_layout,
+                    let shell_elements =
+                        renderer::collect_shell_elements(
+                            renderer,
+                            &state.shell,
+                            &state.shell.dock_layout,
 
-        &mut top_bar_glass,
-        &mut launcher_glass,
-        &mut dock_glass,
+                            &mut top_bar_glass,
+                            &mut launcher_glass,
+                            &mut dock_glass,
 
-        &top_bar_shadow_buffer,
-        &top_bar_highlight_buffer,
-        &top_bar_border_buffer,
+                            &top_bar_shadow_buffer,
+                            &top_bar_highlight_buffer,
+                            &top_bar_border_buffer,
 
-        &dock_shadow_buffer,
-        &dock_highlight_buffer,
-        &dock_border_buffer,
+                            &dock_shadow_buffer,
+                            &dock_highlight_buffer,
+                            &dock_border_buffer,
 
-        scale,
-    );
+                            scale,
+                        );
 
                     // ------------------------------------------------
                     // SHELL + CLIENT WINDOWS
                     // ------------------------------------------------
-    let output_size =
-    state
-        .space
-        .output_geometry(&output)
-        .map(|geometry| geometry.size)
-        .unwrap_or_else(|| {
-            mode.size
-                .to_f64()
-                .to_logical(scale)
-                .to_i32_round()
-        });
+                    let output_size =
+                        state
+                            .space
+                            .output_geometry(&output)
+                            .map(|geometry| geometry.size)
+                            .unwrap_or_else(|| {
+                                mode.size
+                                    .to_f64()
+                                    .to_logical(scale)
+                                    .to_i32_round()
+                            });
 
-let elements = renderer::collect_frame_elements(
-    renderer,
-    &state.space,
-    scale,
-    &wallpaper,
-    output_size,
-    shell_elements,
-    std::iter::empty(),
-)?;
+                    let elements = renderer::collect_frame_elements(
+                        renderer,
+                        &state.space,
+                        scale,
+                        &wallpaper,
+                        output_size,
+                        shell_elements,
+                        std::iter::empty(),
+                    )?;
 
                     // ------------------------------------------------
                     // DAMAGE TRACKER
