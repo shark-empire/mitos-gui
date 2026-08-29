@@ -76,7 +76,7 @@ impl GlassPanel {
         Self::new(
             (0, 0),
             (width, height),
-            MitosTheme::PANEL_RADIUS,
+            MitosTheme::effective_panel_radius(),
             glass_color(),
         )
     }
@@ -95,7 +95,7 @@ impl GlassPanel {
         Self::new(
             (x, y),
             (width, height),
-            MitosTheme::PANEL_RADIUS,
+            MitosTheme::effective_panel_radius(),
             glass_color(),
         )
     }
@@ -207,6 +207,31 @@ pub struct Wallpaper {
 }
 
 impl Wallpaper {
+    fn from_rgba(rgba: image::RgbaImage) -> Result<Self, String> {
+        let width = rgba.width() as i32;
+        let height = rgba.height() as i32;
+
+        if width <= 0 || height <= 0 {
+            return Err("wallpaper has invalid dimensions".to_string());
+        }
+
+        let buffer_size = (width, height).into();
+
+        let buffer = MemoryRenderBuffer::from_slice(
+            rgba.as_raw(),
+            Fourcc::Abgr8888,
+            buffer_size,
+            1,
+            Transform::Normal,
+            Some(vec![Rectangle::from_size(buffer_size)]),
+        );
+
+        Ok(Self {
+            buffer,
+            size: Size::<i32, Logical>::new(width, height),
+        })
+    }
+
     /// Load the built-in MITOS wallpaper.
     pub fn load_default() -> Result<Self, String> {
         let image =
@@ -219,43 +244,26 @@ impl Wallpaper {
 
         let rgba = image.to_rgba8();
 
-        let width = rgba.width() as i32;
-        let height = rgba.height() as i32;
-
-        if width <= 0 || height <= 0 {
-            return Err(
-                "MITOS wallpaper has invalid dimensions"
-                    .to_string()
-            );
-        }
-
-        let buffer_size = (width, height).into();
-
-let logical_size =
-    Size::<i32, Logical>::new(width, height);
-
-        let buffer =
-            MemoryRenderBuffer::from_slice(
-                rgba.as_raw(),
-                Fourcc::Abgr8888,
-                buffer_size,
-                1,
-                Transform::Normal,
-                Some(vec![
-                    Rectangle::from_size(buffer_size),
-                ]),
-            );
-
         println!(
             "MITOS GUI: wallpaper loaded ({}x{})",
-            width,
-            height
+            rgba.width(),
+            rgba.height()
         );
 
-        Ok(Self {
-            buffer,
-            size: logical_size,
-        })
+        Self::from_rgba(rgba)
+    }
+
+    /// Load a wallpaper from disk (set via home.conf `wallpaper = ...`).
+    pub fn load_from_path(path: &str) -> Result<Self, String> {
+        let data = std::fs::read(path)
+            .map_err(|err| format!("failed to read wallpaper {path}: {err}"))?;
+
+        let image = image::load_from_memory(&data)
+            .map_err(|err| format!("failed to decode wallpaper {path}: {err}"))?;
+
+        println!("MITOS GUI: wallpaper loaded from {path}");
+
+        Self::from_rgba(image.to_rgba8())
     }
 
     /// Create the render element for the current output.
@@ -379,7 +387,7 @@ render_elements! {
 
 /// Main translucent MITOS glass color.
 pub fn glass_color() -> Color32F {
-    let c = MitosTheme::GLASS;
+    let c = MitosTheme::effective_glass();
 
     Color32F::new(
         c.r,
@@ -435,7 +443,8 @@ pub fn top_bar_color() -> Color32F {
 pub fn create_glass_panel_element(
     renderer: &mut GlesRenderer,
 ) -> Result<PixelShaderElement, GlesError> {
-    let glass = MitosTheme::GLASS;
+    let glass = MitosTheme::effective_glass();
+    let radius = MitosTheme::effective_panel_radius();
 
     let shader = format!(
         r#"
@@ -483,7 +492,7 @@ void main() {{
     );
 }}
 "#,
-        radius = MitosTheme::PANEL_RADIUS,
+        radius = radius,
         r = glass.r,
         g = glass.g,
         b = glass.b,
@@ -727,7 +736,7 @@ fn collect_dock_icon_elements(
         let y = center_y;
 
         let color = if item.active {
-            MitosTheme::ACCENT
+            MitosTheme::effective_accent()
         } else {
             MitosTheme::GLASS_LIGHT
         };
