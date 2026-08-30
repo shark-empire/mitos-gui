@@ -10,6 +10,7 @@ mod state;
 mod surface;
 mod theme;
 mod wm;
+mod shell_interaction;
 
 use std::sync::Arc;
 use std::time::Duration;
