@@ -11,6 +11,7 @@ mod state;
 mod surface;
 mod theme;
 mod wm;
+mod notify;
 
 use std::sync::Arc;
 use std::time::Duration;
