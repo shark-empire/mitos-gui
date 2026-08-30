@@ -1,8 +1,9 @@
 //! Keyboard input.
 //!
-//! Stage 3 keyboard handling:
+//! Stage 4 keyboard handling:
 //! - forward normal keys to the focused Wayland client
 //! - Super + Space toggles the MITOS launcher
+//! - Stage 4 window manager shortcuts (close, maximize, snap, etc.)
 
 use smithay::backend::input::{
     Event,
@@ -61,6 +62,59 @@ pub fn handle_keyboard_key<B: InputBackend>(
                 );
 
                 return FilterResult::Intercept(());
+            }
+
+            // --------------------------------------------------------
+            // Stage 4 Window Manager shortcuts
+            // --------------------------------------------------------
+
+            if mods.logo {
+                // Super + Q: Close focused window
+                if keysym == keysyms::KEY_q.into() {
+                    crate::wm::close_focused(state);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + F: Toggle fullscreen
+                if keysym == keysyms::KEY_f.into() {
+                    crate::wm::toggle_fullscreen(state);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Up: Toggle maximize
+                if keysym == keysyms::KEY_Up.into() {
+                    crate::wm::toggle_maximize(state);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Down: Minimize
+                // Super + Shift + Down: Restore last minimized
+                if keysym == keysyms::KEY_Down.into() {
+                    if mods.shift {
+                        crate::wm::restore_minimized(state);
+                    } else {
+                        crate::wm::minimize_focused(state);
+                    }
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Left: Snap to left half
+                if keysym == keysyms::KEY_Left.into() {
+                    crate::wm::snap(state, crate::wm::SnapSide::Left);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Right: Snap to right half
+                if keysym == keysyms::KEY_Right.into() {
+                    crate::wm::snap(state, crate::wm::SnapSide::Right);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Tab: Cycle focus through mapped windows
+                if keysym == keysyms::KEY_Tab.into() {
+                    crate::wm::cycle_focus(state);
+                    return FilterResult::Intercept(());
+                }
             }
 
             // --------------------------------------------------------
