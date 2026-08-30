@@ -6,11 +6,11 @@ mod input;
 mod keyboard;
 mod pointer;
 mod renderer;
+mod shell_interaction;
 mod state;
 mod surface;
 mod theme;
 mod wm;
-mod shell_interaction;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -516,252 +516,262 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // ========================================================
-        // BUFFER AGE
+        // FRAME SCHEDULING & DAMAGE TRACKING
         // ========================================================
+        // Only render if we have damage, a forced full redraw, or initial frames.
+        let should_render = state.pending_full_redraw || full_redraw_frames > 0;
 
-        let age = if full_redraw_frames > 0 {
-            0
-        } else {
-            backend.buffer_age().unwrap_or(0)
-        };
+        if should_render {
+            state.pending_full_redraw = false; // Consume any newly arrived damage
 
-        // ========================================================
-        // OUTPUT SCALE
-        // ========================================================
+            // ========================================================
+            // BUFFER AGE
+            // ========================================================
 
-        let scale =
-            Scale::from(
-                output.current_scale().fractional_scale()
-            );
+            let age = if full_redraw_frames > 0 {
+                0
+            } else {
+                backend.buffer_age().unwrap_or(0)
+            };
 
-        // ========================================================
-        // TOP BAR GPU RESOURCES
-        // ========================================================
+            // ========================================================
+            // OUTPUT SCALE
+            // ========================================================
 
-        if let Some(panel) =
-            state.shell.top_bar
-        {
-            let width = panel.size.0;
+            let scale =
+                Scale::from(
+                    output.current_scale().fractional_scale()
+                );
 
-            // ----------------------------------------------------
-            // Shadow
-            // ----------------------------------------------------
+            // ========================================================
+            // TOP BAR GPU RESOURCES
+            // ========================================================
 
-            top_bar_shadow_buffer.update(
-                (width, 8),
-                renderer::shadow_color(),
-            );
+            if let Some(panel) =
+                state.shell.top_bar
+            {
+                let width = panel.size.0;
 
-            // ----------------------------------------------------
-            // Highlight
-            // ----------------------------------------------------
+                // ----------------------------------------------------
+                // Shadow
+                // ----------------------------------------------------
 
-            top_bar_highlight_buffer.update(
-                (width, 2),
-                renderer::glass_highlight_color(),
-            );
+                top_bar_shadow_buffer.update(
+                    (width, 8),
+                    renderer::shadow_color(),
+                );
 
-            // ----------------------------------------------------
-            // Border
-            // ----------------------------------------------------
+                // ----------------------------------------------------
+                // Highlight
+                // ----------------------------------------------------
 
-            let border =
-                theme::MitosTheme::BORDER;
+                top_bar_highlight_buffer.update(
+                    (width, 2),
+                    renderer::glass_highlight_color(),
+                );
 
-            top_bar_border_buffer.update(
-                (width, 1),
-                smithay::backend::renderer::Color32F::new(
-                    border.r,
-                    border.g,
-                    border.b,
-                    border.a,
-                ),
-            );
+                // ----------------------------------------------------
+                // Border
+                // ----------------------------------------------------
 
-            state.shell.top_bar =
-                Some(panel);
-        } else {
-            state.shell.top_bar = None;
-        }
+                let border =
+                    theme::MitosTheme::BORDER;
 
-        // ============================================================
-        // DOCK GPU RESOURCES
-        // ============================================================
+                top_bar_border_buffer.update(
+                    (width, 1),
+                    smithay::backend::renderer::Color32F::new(
+                        border.r,
+                        border.g,
+                        border.b,
+                        border.a,
+                    ),
+                );
 
-        if let Some(panel) = state.shell.dock {
-            let width = panel.size.0;
+                state.shell.top_bar =
+                    Some(panel);
+            } else {
+                state.shell.top_bar = None;
+            }
 
-            dock_shadow_buffer.update(
-                (width, 12),
-                renderer::shadow_color(),
-            );
+            // ============================================================
+            // DOCK GPU RESOURCES
+            // ============================================================
 
-            dock_highlight_buffer.update(
-                (width, 2),
-                renderer::glass_highlight_color(),
-            );
+            if let Some(panel) = state.shell.dock {
+                let width = panel.size.0;
 
-            let border = theme::MitosTheme::BORDER;
+                dock_shadow_buffer.update(
+                    (width, 12),
+                    renderer::shadow_color(),
+                );
 
-            dock_border_buffer.update(
-                (width, 1),
-                smithay::backend::renderer::Color32F::new(
-                    border.r,
-                    border.g,
-                    border.b,
-                    border.a,
-                ),
-            );
-        }
-        
-        // ========================================================
-        // DRAW FRAME
-        // ========================================================
+                dock_highlight_buffer.update(
+                    (width, 2),
+                    renderer::glass_highlight_color(),
+                );
 
-        let render_result =
-            backend.bind().and_then(
-                |(renderer, mut framebuffer)| {
-                    // ------------------------------------------------
-                    // MITOS SHELL
-                    // ------------------------------------------------
-                    //
-                    // renderer.rs owns the actual panel rendering.
-                    //
+                let border = theme::MitosTheme::BORDER;
 
-let shell_elements =
-    renderer::collect_shell_elements(
-        renderer,
-        &state.shell,
-        &state.shell.dock_layout,
-        (state.pointer_location.x, state.pointer_location.y),
+                dock_border_buffer.update(
+                    (width, 1),
+                    smithay::backend::renderer::Color32F::new(
+                        border.r,
+                        border.g,
+                        border.b,
+                        border.a,
+                    ),
+                );
+            }
+            
+            // ========================================================
+            // DRAW FRAME
+            // ========================================================
 
-        &mut top_bar_glass,
-        &mut launcher_glass,
-        &mut dock_glass,
+            let render_result =
+                backend.bind().and_then(
+                    |(renderer, mut framebuffer)| {
+                        // ------------------------------------------------
+                        // MITOS SHELL
+                        // ------------------------------------------------
+                        //
+                        // renderer.rs owns the actual panel rendering.
+                        //
 
-        &top_bar_shadow_buffer,
-        &top_bar_highlight_buffer,
-        &top_bar_border_buffer,
+                        let shell_elements =
+                            renderer::collect_shell_elements(
+                                renderer,
+                                &state.shell,
+                                &state.shell.dock_layout,
+                                (state.pointer_location.x, state.pointer_location.y),
 
-        &dock_shadow_buffer,
-        &dock_highlight_buffer,
-        &dock_border_buffer,
+                                &mut top_bar_glass,
+                                &mut launcher_glass,
+                                &mut dock_glass,
 
-        scale,
-    );
+                                &top_bar_shadow_buffer,
+                                &top_bar_highlight_buffer,
+                                &top_bar_border_buffer,
+
+                                &dock_shadow_buffer,
+                                &dock_highlight_buffer,
+                                &dock_border_buffer,
+
+                                scale,
+                            );
 
 
-                    // ------------------------------------------------
-                    // SHELL + CLIENT WINDOWS
-                    // ------------------------------------------------
-                    let output_size =
-                        state
-                            .space
-                            .output_geometry(&output)
-                            .map(|geometry| geometry.size)
-                            .unwrap_or_else(|| {
-                                mode.size
-                                    .to_f64()
-                                    .to_logical(scale)
-                                    .to_i32_round()
-                            });
+                        // ------------------------------------------------
+                        // SHELL + CLIENT WINDOWS
+                        // ------------------------------------------------
+                        let output_size =
+                            state
+                                .space
+                                .output_geometry(&output)
+                                .map(|geometry| geometry.size)
+                                .unwrap_or_else(|| {
+                                    mode.size
+                                        .to_f64()
+                                        .to_logical(scale)
+                                        .to_i32_round()
+                                });
 
-                    let elements = renderer::collect_frame_elements(
-                        renderer,
-                        &state.space,
-                        scale,
-                        &wallpaper,
-                        output_size,
-                        shell_elements,
-                        std::iter::empty(),
-                    )?;
-
-                    // ------------------------------------------------
-                    // DAMAGE TRACKER
-                    // ------------------------------------------------
-
-                    damage_tracker
-                        .render_output(
+                        let elements = renderer::collect_frame_elements(
                             renderer,
-                            &mut framebuffer,
-                            age,
-                            &elements,
-                            renderer::clear_color(
-                                &state.home_screen,
-                            ),
-                        )
-                        .map_err(|err| match err {
-                            DamageTrackerError::Rendering(
-                                err,
-                            ) => err.into(),
+                            &state.space,
+                            scale,
+                            &wallpaper,
+                            output_size,
+                            shell_elements,
+                            std::iter::empty(),
+                        )?;
 
-                            _ => unreachable!(
-                                "output-mode errors can't happen: mode is always set above"
-                            ),
-                        })
-                },
-            );
+                        // ------------------------------------------------
+                        // DAMAGE TRACKER
+                        // ------------------------------------------------
 
-        // ========================================================
-        // SUBMIT FRAME
-        // ========================================================
+                        damage_tracker
+                            .render_output(
+                                renderer,
+                                &mut framebuffer,
+                                age,
+                                &elements,
+                                renderer::clear_color(
+                                    &state.home_screen,
+                                ),
+                            )
+                            .map_err(|err| match err {
+                                DamageTrackerError::Rendering(
+                                    err,
+                                ) => err.into(),
 
-        match render_result {
-            Ok(render_output_result) => {
-                if let Some(damage) =
-                    render_output_result.damage
-                {
-                    if let Err(err) =
-                        backend.submit(Some(damage))
+                                _ => unreachable!(
+                                    "output-mode errors can't happen: mode is always set above"
+                                ),
+                            })
+                    },
+                );
+
+            // ========================================================
+            // SUBMIT FRAME
+            // ========================================================
+
+            match render_result {
+                Ok(render_output_result) => {
+                    if let Some(damage) =
+                        render_output_result.damage
                     {
-                        tracing::warn!(
-                            "MITOS GUI: failed to submit frame: {err}"
+                        if let Err(err) =
+                            backend.submit(Some(damage))
+                        {
+                            tracing::warn!(
+                                "MITOS GUI: failed to submit frame: {err}"
+                            );
+                        }
+                    }
+
+                    full_redraw_frames =
+                        full_redraw_frames.saturating_sub(1);
+
+                    // ------------------------------------------------
+                    // Frame callbacks
+                    // ------------------------------------------------
+
+                    let now =
+                        state.clock.now();
+
+                    for window in state.space.elements() {
+                        window.send_frame(
+                            &output,
+                            now,
+                            Some(Duration::from_secs(1)),
+                            |_, _| Some(output.clone()),
                         );
                     }
                 }
 
-                full_redraw_frames =
-                    full_redraw_frames.saturating_sub(1);
+                // ----------------------------------------------------
+                // GPU CONTEXT LOST
+                // ----------------------------------------------------
 
-                // ------------------------------------------------
-                // Frame callbacks
-                // ------------------------------------------------
+                Err(
+                    SwapBuffersError::ContextLost(err)
+                ) => {
+                    tracing::error!(
+                        "MITOS GUI: critical rendering error, exiting: {err}"
+                    );
 
-                let now =
-                    state.clock.now();
+                    break;
+                }
 
-                for window in state.space.elements() {
-                    window.send_frame(
-                        &output,
-                        now,
-                        Some(Duration::from_secs(1)),
-                        |_, _| Some(output.clone()),
+                // ----------------------------------------------------
+                // OTHER RENDER ERROR
+                // ----------------------------------------------------
+
+                Err(err) => {
+                    tracing::warn!(
+                        "MITOS GUI: render error: {err}"
                     );
                 }
-            }
-
-            // ----------------------------------------------------
-            // GPU CONTEXT LOST
-            // ----------------------------------------------------
-
-            Err(
-                SwapBuffersError::ContextLost(err)
-            ) => {
-                tracing::error!(
-                    "MITOS GUI: critical rendering error, exiting: {err}"
-                );
-
-                break;
-            }
-
-            // ----------------------------------------------------
-            // OTHER RENDER ERROR
-            // ----------------------------------------------------
-
-            Err(err) => {
-                tracing::warn!(
-                    "MITOS GUI: render error: {err}"
-                );
             }
         }
 
@@ -778,8 +788,19 @@ let shell_elements =
 
         display.flush_clients()?;
 
+        // ========================================================
+        // VSYNC / IDLE CPU FIX
+        // ========================================================
+        // If we just rendered (damage existed), pump events immediately.
+        // If we are idle (no damage), sleep for 16ms to save CPU (~60fps).
+        let timeout = if should_render {
+            Duration::from_millis(1)
+        } else {
+            Duration::from_millis(16)
+        };
+
         event_loop.dispatch(
-            Duration::from_millis(1),
+            Some(timeout),
             &mut state,
         )?;
     }
