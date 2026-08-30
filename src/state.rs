@@ -2,10 +2,8 @@
 
 use crate::desktop::HomeScreenConfig;
 use crate::renderer::GlassPanel;
-use crate::wm::InteractiveAction;
 use crate::shell_interaction::AppEntry;
-
-
+use crate::wm::InteractiveAction;
 
 use smithay::{
     desktop::{PopupManager, Space, Window},
@@ -48,6 +46,11 @@ pub struct MitosShell {
 
     /// Whether the launcher is currently visible.
     pub launcher_visible: bool,
+
+    // --- Launcher Search State ---
+    pub launcher_query: String,
+    pub launcher_results: Vec<AppEntry>,
+    pub launcher_selected: usize,
 }
 
 impl MitosShell {
@@ -58,6 +61,9 @@ impl MitosShell {
             dock: None,
             dock_layout: crate::desktop::DockLayout::default(),
             launcher_visible: false,
+            launcher_query: String::new(),
+            launcher_results: Vec::new(),
+            launcher_selected: 0,
         }
     }
 
@@ -65,16 +71,9 @@ impl MitosShell {
     pub fn update_layout(
         &mut self,
         config: &HomeScreenConfig,
-        output_size: smithay::utils::Size<
-            i32,
-            smithay::utils::Logical,
-        >,
+        output_size: smithay::utils::Size<i32, smithay::utils::Logical>,
     ) {
-        let layout =
-            crate::desktop::ShellLayout::calculate(
-                config,
-                output_size,
-            );
+        let layout = crate::desktop::ShellLayout::calculate(config, output_size);
 
         self.top_bar = layout.top_bar;
         self.launcher = layout.launcher;
@@ -84,6 +83,12 @@ impl MitosShell {
     /// Toggle the launcher visibility.
     pub fn toggle_launcher(&mut self) {
         self.launcher_visible = !self.launcher_visible;
+        if self.launcher_visible {
+            // Reset state when opening
+            self.launcher_query.clear();
+            self.launcher_results = crate::shell_interaction::discover_apps();
+            self.launcher_selected = 0;
+        }
     }
 }
 
@@ -175,7 +180,6 @@ pub struct MitosGuiState {
     /// Discovered applications for the launcher.
     pub launcher_apps: Vec<AppEntry>,
 
-
     /// Set by the config watcher; consumed by the main loop to force
     /// a full redraw and shader recompile after a live config reload.
     pub pending_full_redraw: bool,
@@ -195,76 +199,53 @@ impl MitosGuiState {
     ) -> Self {
         // ------------------------------------------------------------
         // Desktop space
-        //
-        // The output starts at logical coordinate (0, 0).
-        // Client windows will later be mapped into this space.
         // ------------------------------------------------------------
-
         let mut space = Space::default();
-
         space.map_output(&output, (0, 0));
 
         let mut shell = MitosShell::new();
         let output_size = output
             .current_mode()
             .map(|mode| {
-                smithay::utils::Size::<
-                    i32,
-                    smithay::utils::Logical,
-                >::from((
+                smithay::utils::Size::<i32, smithay::utils::Logical>::from((
                     mode.size.w,
                     mode.size.h,
                 ))
             })
             .unwrap_or_else(|| {
-                smithay::utils::Size::<
-                    i32,
-                    smithay::utils::Logical,
-                >::new(1280, 720)
+                smithay::utils::Size::<i32, smithay::utils::Logical>::new(1280, 720)
             });
 
-        shell.update_layout(
-            &home_screen,
-            output_size,
-        );
+        shell.update_layout(&home_screen, output_size);
+
+        // ------------------------------------------------------------
+        // Pre-discover apps for the launcher search
+        // ------------------------------------------------------------
+        let launcher_apps = crate::shell_interaction::discover_apps();
+        
+        // Pre-populate launcher results so it's ready immediately when opened
+        shell.launcher_results = launcher_apps.clone();
 
         // ------------------------------------------------------------
         // Global state
         // ------------------------------------------------------------
-
         Self {
             compositor_state,
             xdg_shell_state,
             shm_state,
-
             seat_state,
             seat,
-
             shell,
-
             output,
-
             home_screen,
             space,
             popups: PopupManager::default(),
-
             pointer_location: (0.0, 0.0).into(),
             clock: Clock::new(),
-            
-            pointer_location: (0.0, 0.0).into(),
-            clock: Clock::new(),
-            pending_full_redraw: false,
-
             focused_window: None,
             minimized: Vec::new(),
             interactive: None,
-
-            focused_window: None,
-            minimized: Vec::new(),
-            interactive: None,
-            launcher_apps: crate::shell_interaction::discover_apps(),
-
-
+            launcher_apps,
             pending_full_redraw: false,
         }
     }
@@ -276,7 +257,6 @@ impl MitosGuiState {
         println!("MITOS GUI: home.conf changed, reloading configuration");
 
         self.home_screen = HomeScreenConfig::load();
-
         crate::theme::MitosTheme::apply_runtime(&self.home_screen);
 
         let output_size = self
@@ -293,7 +273,6 @@ impl MitosGuiState {
             });
 
         self.shell.update_layout(&self.home_screen, output_size);
-
         self.pending_full_redraw = true;
     }
 }
@@ -318,8 +297,7 @@ impl SeatHandler for MitosGuiState {
         _seat: &Seat<Self>,
         _focused: Option<&WlSurface>,
     ) {
-        // Window focus handling will be implemented during
-        // the Stage 4 window-manager work.
+        // Handled by wm::set_focus
     }
 
     /// Called when a client changes its cursor image.
