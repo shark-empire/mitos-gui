@@ -2,6 +2,8 @@
 
 use crate::desktop::HomeScreenConfig;
 use crate::renderer::GlassPanel;
+use crate::wm::InteractiveAction;
+
 
 use smithay::{
     desktop::{PopupManager, Space, Window},
@@ -159,6 +161,15 @@ pub struct MitosGuiState {
     /// Monotonic compositor clock.
     pub clock: Clock<Monotonic>,
 
+    /// Currently focused window.
+    pub focused_window: Option<Window>,
+
+    /// Minimized windows (most recent last).
+    pub minimized: Vec<Window>,
+
+    /// Active interactive move/resize gesture.
+    pub interactive: Option<InteractiveAction>,
+
     /// Set by the config watcher; consumed by the main loop to force
     /// a full redraw and shader recompile after a live config reload.
     pub pending_full_redraw: bool,
@@ -233,6 +244,15 @@ impl MitosGuiState {
 
             pointer_location: (0.0, 0.0).into(),
             clock: Clock::new(),
+            
+            pointer_location: (0.0, 0.0).into(),
+            clock: Clock::new(),
+            pending_full_redraw: false,
+
+            focused_window: None,
+            minimized: Vec::new(),
+            interactive: None,
+
             pending_full_redraw: false,
         }
     }
