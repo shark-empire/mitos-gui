@@ -376,10 +376,12 @@ render_elements! {
     pub ChromeRenderElement<=GlesRenderer>;
 
     Wallpaper=MemoryRenderBufferRenderElement<GlesRenderer>,
+    Text=MemoryRenderBufferRenderElement<GlesRenderer>,
     Glass=PixelShaderElement,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     SolidColor=SolidColorRenderElement,
 }
+
 
 // ============================================================================
 // THEME COLORS
@@ -811,6 +813,101 @@ fn collect_dock_icon_elements(
 
 
 // ============================================================================
+// SHELL TEXT STATE (clock + launcher search)
+// ============================================================================
+
+/// Caches rasterized shell text; re-rasterizes only when strings change.
+pub struct ShellTextState {
+    text_renderer: crate::text::TextRenderer,
+
+    clock_string: String,
+    clock_texture: Option<crate::text::TextTexture>,
+
+    query_string: String,
+    query_texture: Option<crate::text::TextTexture>,
+
+    result_names: Vec<String>,
+    result_textures: Vec<Option<crate::text::TextTexture>>,
+}
+
+impl ShellTextState {
+    pub fn new() -> Self {
+        Self {
+            text_renderer: crate::text::TextRenderer::new(),
+            clock_string: String::new(),
+            clock_texture: None,
+            query_string: String::new(),
+            query_texture: None,
+            result_names: Vec::new(),
+            result_textures: Vec::new(),
+        }
+    }
+
+    /// Re-rasterize any text that changed. Returns true if anything
+    /// changed, so the caller can request a redraw.
+    pub fn refresh(&mut self, shell: &crate::state::MitosShell) -> bool {
+        let mut changed = false;
+
+        // --------------------------------------------------------
+        // Top bar clock (changes once per minute)
+        // --------------------------------------------------------
+        let now = crate::shell_interaction::current_time_string();
+
+        if now != self.clock_string {
+            self.clock_string = now.clone();
+            self.clock_texture = self
+                .text_renderer
+                .render(&now, 14.0, (235, 240, 250, 255))
+                .and_then(crate::text::TextTexture::from_rgba);
+            changed = true;
+        }
+
+        // --------------------------------------------------------
+        // Launcher search text
+        // --------------------------------------------------------
+        if shell.launcher_visible {
+            let q = if shell.launcher_query.is_empty() {
+                "Type to search".to_string()
+            } else {
+                shell.launcher_query.clone()
+            };
+
+            if q != self.query_string {
+                self.query_string = q.clone();
+                self.query_texture = self
+                    .text_renderer
+                    .render(&q, 20.0, (255, 255, 255, 255))
+                    .and_then(crate::text::TextTexture::from_rgba);
+                changed = true;
+            }
+
+            let names: Vec<String> = shell
+                .launcher_results
+                .iter()
+                .take(8)
+                .map(|a| a.name.clone())
+                .collect();
+
+            if names != self.result_names {
+                self.result_names = names.clone();
+                self.result_textures = names
+                    .iter()
+                    .map(|n| {
+                        self.text_renderer
+                            .render(n, 16.0, (220, 226, 238, 255))
+                            .and_then(crate::text::TextTexture::from_rgba)
+                    })
+                    .collect();
+                changed = true;
+            }
+        }
+
+        changed
+    }
+}
+
+
+// ============================================================================
 // COMPLETE MITOS SHELL
 // ============================================================================
 
@@ -839,52 +936,92 @@ pub fn collect_shell_elements(
     dock_highlight: &SolidColorBuffer,
     dock_border: &SolidColorBuffer,
 
+    text: &ShellTextState,
+
     scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
 
     // ------------------------------------------------------------
-    // TOP BAR
+    // TOP BAR + CLOCK
     // ------------------------------------------------------------
-
     if let Some(panel) = shell.top_bar.as_ref() {
-        elements.extend(
-            collect_top_bar_elements(
-                panel,
-                top_bar_glass,
-                top_bar_shadow,
-                top_bar_highlight,
-                top_bar_border,
-                renderer,
-                scale,
-            ),
-        );
+        elements.extend(collect_top_bar_elements(
+            panel, top_bar_glass,
+            top_bar_shadow, top_bar_highlight, top_bar_border,
+            renderer, scale,
+        ));
+
+        if let Some(clock) = text.clock_texture.as_ref() {
+            let x = panel.position.0 + panel.size.0 - clock.size.w - 12;
+            let y = panel.position.1 + (panel.size.1 - clock.size.h) / 2;
+
+            if let Ok(el) = clock.element(renderer, (x, y)) {
+                elements.push(ChromeRenderElement::Text(el));
+            }
+        }
     }
 
- // ------------------------------------------------------------
-// LAUNCHER
-// ------------------------------------------------------------
+    // ------------------------------------------------------------
+    // LAUNCHER + SEARCH UI
+    // ------------------------------------------------------------
+    if shell.launcher_visible {
+        if let Some(panel) = shell.launcher.as_ref() {
+            elements.extend(collect_launcher_elements(
+                panel, launcher_glass,
+                top_bar_shadow, top_bar_highlight, top_bar_border,
+                renderer, scale,
+            ));
 
-if shell.launcher_visible {
-    if let Some(panel) = shell.launcher.as_ref() {
-        elements.extend(
-            collect_launcher_elements(
-                panel,
-                launcher_glass,
-                top_bar_shadow,
-                top_bar_highlight,
-                top_bar_border,
-                renderer,
-                scale,
-            ),
-        );
+            let (px, py) = panel.position;
+            let (pw, ph) = panel.size;
+
+            // Search query
+            if let Some(q) = text.query_texture.as_ref() {
+                if let Ok(el) = q.element(renderer, (px + 24, py + 22)) {
+                    elements.push(ChromeRenderElement::Text(el));
+                }
+            }
+
+            // Results list with selection highlight
+            let row_h = 36;
+            let list_top = py + 64;
+
+            for (i, tex) in text.result_textures.iter().enumerate() {
+                let row_y = list_top + i as i32 * row_h;
+
+                if row_y + row_h > py + ph - 8 {
+                    break;
+                }
+
+                if i == shell.launcher_selected {
+                    let accent = crate::theme::MitosTheme::effective_accent();
+
+                    let hl = SolidColorBuffer::new(
+                        (pw - 24, row_h - 4),
+                        Color32F::new(accent.r, accent.g, accent.b, 0.25),
+                    );
+
+                    elements.extend(hl.render_elements(
+                        renderer,
+                        (px + 12, row_y + 2).into(),
+                        scale,
+                        1.0,
+                    ));
+                }
+
+                if let Some(t) = tex {
+                    if let Ok(el) = t.element(renderer, (px + 24, row_y + 6)) {
+                        elements.push(ChromeRenderElement::Text(el));
+                    }
+                }
+            }
+        }
     }
-}
 
-// ------------------------------------------------------------
-// DOCK
-// ------------------------------------------------------------
-
+    // ------------------------------------------------------------
+    // DOCK
+    // ------------------------------------------------------------
     if let Some(panel) = shell.dock.as_ref() {
         elements.extend(collect_dock_elements(
             panel, dock_layout, dock_glass,
@@ -895,6 +1032,7 @@ if shell.launcher_visible {
 
     elements
 }
+
 
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
