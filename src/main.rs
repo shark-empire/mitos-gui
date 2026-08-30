@@ -12,6 +12,7 @@ mod surface;
 mod theme;
 mod wm;
 mod notify;
+mod text;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -368,6 +369,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             backend.renderer(),
         )?;
 
+    
+
+    let mut shell_text = renderer::ShellTextState::new();
+
+
     // ============================================================
     // FULL REDRAW
     // ============================================================
@@ -524,6 +530,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        // Re-rasterize clock / launcher text if it changed
+if shell_text.refresh(&state.shell) {
+    state.pending_full_redraw = true;
+}
+
         // ========================================================
         // FRAME SCHEDULING & DAMAGE TRACKING
         // ========================================================
@@ -664,6 +675,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 &dock_shadow_buffer,
                                 &dock_highlight_buffer,
                                 &dock_border_buffer,
+
+                                &shell_text,
 
                                 scale,
                             );
