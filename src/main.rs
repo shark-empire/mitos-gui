@@ -381,6 +381,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI: Stage 3 shell initialized");
     println!("MITOS GUI: event loop running");
 
+
+
+    println!("MITOS GUI: Stage 3 shell initialized");
+    
+    // Tell mitos-init we are ready to render
+    notify::send_ready(); 
+
+    println!("MITOS GUI: event loop running");
     // ============================================================
     // MAIN LOOP
     // ============================================================
