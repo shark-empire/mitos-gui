@@ -156,6 +156,9 @@ pub fn set_focus(state: &mut MitosGuiState, window: Option<Window>) {
     if let Some(keyboard) = state.seat.get_keyboard() {
         keyboard.set_focus(state, surface, SERIAL_COUNTER.next_serial());
     }
+    
+    // Update dock running indicators when focus changes
+    crate::shell_interaction::update_running_state(state);
 }
 
 /// Cycle focus through mapped windows (Super+Tab).
@@ -191,46 +194,123 @@ pub fn close_focused(state: &mut MitosGuiState) {
     }
 }
 
+// ============================================================================
+// CLIENT REQUESTS (Called from compositor.rs XDG shell handlers)
+// ============================================================================
+
+/// Handle a client request to maximize the window.
+pub fn request_maximize(state: &mut MitosGuiState, window: &Window) {
+    let Some(tl) = toplevel(window) else { return; };
+    let area = usable_area(state);
+    
+    let mut m = meta(window);
+    if !m.fullscreen && !m.maximized {
+        m.saved = Some(current_geometry(state, window));
+    }
+    m.maximized = true;
+    drop(m);
+
+    tl.with_pending_state(|s| {
+        s.states.set(xdg_toplevel::State::Maximized);
+        s.size = Some(area.size);
+    });
+    tl.send_configure();
+
+    state.space.map_element(window.clone(), area.loc, true);
+}
+
+/// Handle a client request to unmaximize the window.
+pub fn request_unmaximize(state: &mut MitosGuiState, window: &Window) {
+    let Some(tl) = toplevel(window) else { return; };
+    
+    let mut m = meta(window);
+    m.maximized = false;
+    let saved = m.saved.take();
+    drop(m);
+
+    tl.with_pending_state(|s| {
+        s.states.unset(xdg_toplevel::State::Maximized);
+        s.size = None;
+    });
+    tl.send_configure();
+
+    if let Some(geo) = saved {
+        state.space.map_element(window.clone(), geo.loc, true);
+    }
+}
+
+/// Handle a client request to fullscreen the window.
+pub fn request_fullscreen(state: &mut MitosGuiState, window: &Window) {
+    let Some(tl) = toplevel(window) else { return; };
+    let size = output_size(state);
+    
+    let mut m = meta(window);
+    if !m.maximized && !m.fullscreen {
+        m.saved = Some(current_geometry(state, window));
+    }
+    m.fullscreen = true;
+    drop(m);
+
+    tl.with_pending_state(|s| {
+        s.states.set(xdg_toplevel::State::Fullscreen);
+        s.size = Some(size);
+    });
+    tl.send_configure();
+
+    state.space.map_element(window.clone(), (0, 0).into(), true);
+}
+
+/// Handle a client request to unfullscreen the window.
+pub fn request_unfullscreen(state: &mut MitosGuiState, window: &Window) {
+    let Some(tl) = toplevel(window) else { return; };
+    
+    let mut m = meta(window);
+    m.fullscreen = false;
+    let saved = m.saved.take();
+    drop(m);
+
+    tl.with_pending_state(|s| {
+        s.states.unset(xdg_toplevel::State::Fullscreen);
+        s.size = None;
+    });
+    tl.send_configure();
+
+    if let Some(geo) = saved {
+        state.space.map_element(window.clone(), geo.loc, true);
+    }
+}
+
+/// Handle a client request to minimize the window.
+pub fn request_minimize(state: &mut MitosGuiState, window: &Window) {
+    let mut m = meta(window);
+    if !m.maximized && !m.fullscreen && m.saved.is_none() {
+        m.saved = Some(current_geometry(state, window));
+    }
+    drop(m);
+
+    state.space.unmap_elem(window);
+    state.minimized.push(window.clone());
+    
+    // Focus the topmost remaining window
+    let next_focus = state.space.elements().next_back().cloned();
+    set_focus(state, next_focus);
+}
+
+// ============================================================================
+// COMPOSITOR SHORTCUTS
+// ============================================================================
+
 /// Toggle maximized (Super+Up).
 pub fn toggle_maximize(state: &mut MitosGuiState) {
     let Some(window) = state.focused_window.clone() else {
         return;
     };
-    let Some(tl) = toplevel(&window) else {
-        return;
-    };
-
-    let area = usable_area(state);
-    let mut m = meta(&window);
-
-    if m.maximized {
-        m.maximized = false;
-        let saved = m.saved.take();
-        drop(m);
-
-        tl.with_pending_state(|s| {
-            s.states.unset(xdg_toplevel::State::Maximized);
-            s.size = None;
-        });
-        tl.send_configure();
-
-        if let Some(geo) = saved {
-            state.space.map_element(window, geo.loc, true);
-        }
+    
+    let is_maximized = meta(&window).maximized;
+    if is_maximized {
+        request_unmaximize(state, &window);
     } else {
-        if !m.fullscreen {
-            m.saved = Some(current_geometry(state, &window));
-        }
-        m.maximized = true;
-        drop(m);
-
-        tl.with_pending_state(|s| {
-            s.states.set(xdg_toplevel::State::Maximized);
-            s.size = Some(area.size);
-        });
-        tl.send_configure();
-
-        state.space.map_element(window, area.loc, true);
+        request_maximize(state, &window);
     }
 }
 
@@ -239,41 +319,12 @@ pub fn toggle_fullscreen(state: &mut MitosGuiState) {
     let Some(window) = state.focused_window.clone() else {
         return;
     };
-    let Some(tl) = toplevel(&window) else {
-        return;
-    };
-
-    let size = output_size(state);
-    let mut m = meta(&window);
-
-    if m.fullscreen {
-        m.fullscreen = false;
-        let saved = m.saved.take();
-        drop(m);
-
-        tl.with_pending_state(|s| {
-            s.states.unset(xdg_toplevel::State::Fullscreen);
-            s.size = None;
-        });
-        tl.send_configure();
-
-        if let Some(geo) = saved {
-            state.space.map_element(window, geo.loc, true);
-        }
+    
+    let is_fullscreen = meta(&window).fullscreen;
+    if is_fullscreen {
+        request_unfullscreen(state, &window);
     } else {
-        if !m.maximized {
-            m.saved = Some(current_geometry(state, &window));
-        }
-        m.fullscreen = true;
-        drop(m);
-
-        tl.with_pending_state(|s| {
-            s.states.set(xdg_toplevel::State::Fullscreen);
-            s.size = Some(size);
-        });
-        tl.send_configure();
-
-        state.space.map_element(window, (0, 0).into(), true);
+        request_fullscreen(state, &window);
     }
 }
 
@@ -283,9 +334,7 @@ pub fn minimize_focused(state: &mut MitosGuiState) {
         return;
     };
 
-    state.space.unmap_elem(&window);
-    state.minimized.push(window);
-    set_focus(state, None);
+    request_minimize(state, &window);
 }
 
 /// Restore the most recently minimized window (Super+Shift+Down).
@@ -325,7 +374,18 @@ pub fn snap(state: &mut MitosGuiState, side: SnapSide) {
 
     {
         let mut m = meta(&window);
-        if !m.maximized && !m.fullscreen && m.saved.is_none() {
+        
+        // Clear maximized/fullscreen states if snapping
+        if m.maximized || m.fullscreen {
+            tl.with_pending_state(|s| {
+                s.states.unset(xdg_toplevel::State::Maximized);
+                s.states.unset(xdg_toplevel::State::Fullscreen);
+            });
+            m.maximized = false;
+            m.fullscreen = false;
+        }
+        
+        if m.saved.is_none() {
             m.saved = Some(current_geometry(state, &window));
         }
     }
@@ -346,6 +406,11 @@ pub fn snap(state: &mut MitosGuiState, side: SnapSide) {
 
 /// Begin moving a window (Super + left drag).
 pub fn begin_move(state: &mut MitosGuiState, window: Window) {
+    // If the window is maximized, unmaximize it before moving
+    if meta(&window).maximized {
+        request_unmaximize(state, &window);
+    }
+
     let loc = state
         .space
         .element_location(&window)
@@ -358,6 +423,11 @@ pub fn begin_move(state: &mut MitosGuiState, window: Window) {
 
 /// Begin resizing a window from its bottom-right (Super + right drag).
 pub fn begin_resize(state: &mut MitosGuiState, window: Window) {
+    // If the window is maximized, unmaximize it before resizing
+    if meta(&window).maximized {
+        request_unmaximize(state, &window);
+    }
+
     let start_size = window.geometry().size;
     let start_pointer = state.pointer_location;
 
@@ -413,7 +483,12 @@ pub fn end_interactive(state: &mut MitosGuiState) {
 pub fn cleanup_destroyed(state: &mut MitosGuiState, surface: &WlSurface) {
     if let Some(focused) = &state.focused_window {
         if focused.wl_surface().as_deref() == Some(surface) {
-            state.focused_window = None;
+            // Try to focus the next available window instead of dropping to None
+            let next_focus = state.space.elements()
+                .filter(|w| w.wl_surface().as_deref() != Some(surface))
+                .next_back()
+                .cloned();
+            set_focus(state, next_focus);
         }
     }
 
@@ -426,4 +501,7 @@ pub fn cleanup_destroyed(state: &mut MitosGuiState, surface: &WlSurface) {
             state.interactive = None;
         }
     }
+    
+    // Update dock indicators since a window was destroyed
+    crate::shell_interaction::update_running_state(state);
 }
