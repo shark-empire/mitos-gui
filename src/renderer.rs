@@ -430,16 +430,16 @@ pub fn top_bar_color() -> Color32F {
 // GLASS SHADER
 // ============================================================================
 
-/// Compile the reusable GPU shader used for MITOS glass panels.
+/// Compile the reusable GPU shader used for MITOS liquid glass panels.
 ///
-/// The shader:
-/// - draws a translucent panel
-/// - creates rounded corners using a signed-distance function
-/// - anti-aliases the rounded edge
-///
-/// Panel tint and radius are currently supplied when the shader is generated.
-/// This keeps the implementation compatible with the current Smithay
-/// `PixelShaderElement` API while we build the Stage 3 renderer.
+/// The shader layers, in order:
+///   1. rounded SDF mask with anti-aliased edge
+///   2. translucent tint
+///   3. fresnel rim light (bright edge ring)
+///   4. top specular sweep (light source above)
+///   5. diagonal liquid sheen
+///   6. chromatic refraction tint shift near edges
+///   7. fine surface grain
 pub fn create_glass_panel_element(
     renderer: &mut GlesRenderer,
 ) -> Result<PixelShaderElement, GlesError> {
@@ -451,45 +451,89 @@ pub fn create_glass_panel_element(
 precision mediump float;
 
 varying vec2 v_coords;
-
 uniform vec2 size;
 
 const float RADIUS = {radius:.8};
 
-const vec4 GLASS_COLOR = vec4(
+const vec4 TINT = vec4(
     {r:.8},
     {g:.8},
     {b:.8},
     {a:.8}
 );
 
-void main() {{
-    vec2 position = v_coords * size;
+const float SPECULAR = {specular:.8};
+const float RIM      = {rim:.8};
+const float GRAIN    = {grain:.8};
 
+float sd_round_box(vec2 p, vec2 half_size, float r) {{
+    vec2 q = abs(p) - half_size + vec2(r);
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}}
+
+float hash(vec2 p) {{
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}}
+
+void main() {{
+    vec2 p = v_coords * size;
     vec2 half_size = size * 0.5;
 
-    float radius = min(
-        RADIUS,
-        min(size.x, size.y) * 0.5
-    );
+    // ------------------------------------------------
+    // Rounded mask (anti-aliased)
+    // ------------------------------------------------
+    float d = sd_round_box(p - half_size, half_size, RADIUS);
+    float mask = 1.0 - smoothstep(-1.0, 1.0, d);
 
-    vec2 q = abs(position - half_size)
-        - (half_size - vec2(radius));
+    if (mask <= 0.001) {{
+        gl_FragColor = vec4(0.0);
+        return;
+    }}
 
-    float distance = length(max(q, vec2(0.0)))
-        + min(max(q.x, q.y), 0.0)
-        - radius;
+    // ------------------------------------------------
+    // Edge distance: 0 deep inside → 1 at the rim
+    // ------------------------------------------------
+    float edge = smoothstep(-8.0, 0.0, d);
+    float inner = 1.0 - edge;
 
-    float alpha = 1.0 - smoothstep(
-        0.0,
-        1.0,
-        distance
-    );
+    // ------------------------------------------------
+    // Light model
+    // ------------------------------------------------
+    // Top specular sweep (light from above)
+    float top_light = smoothstep(0.15, 0.9, 1.0 - v_coords.y);
 
-    gl_FragColor = vec4(
-        GLASS_COLOR.rgb,
-        GLASS_COLOR.a * alpha
-    );
+    // Diagonal liquid sheen
+    float sheen =
+        (sin((v_coords.x + v_coords.y * 0.7) * 6.28318) * 0.5 + 0.5);
+    sheen = smoothstep(0.6, 1.0, sheen) * 0.06;
+
+    // Fine grain so the surface reads as real material
+    float grain = (hash(p) - 0.5) * GRAIN;
+
+    // ------------------------------------------------
+    // Compose color
+    // ------------------------------------------------
+    vec3 color = TINT.rgb;
+
+    // Chromatic refraction shift at the rim (liquid look)
+    color.r += edge * 0.04;
+    color.g += edge * 0.06;
+    color.b += edge * 0.10;
+
+    // Specular + sheen + rim + grain
+    color += top_light * SPECULAR * 0.30;
+    color += sheen;
+    color += edge * inner * RIM * 0.35;
+    color += grain;
+
+    // ------------------------------------------------
+    // Alpha
+    // ------------------------------------------------
+    float alpha = TINT.a * mask;
+    // Rim light ring just inside the edge
+    alpha = max(alpha, edge * inner * RIM * 0.45 * mask);
+
+    gl_FragColor = vec4(color, alpha);
 }}
 "#,
         radius = radius,
@@ -497,6 +541,9 @@ void main() {{
         g = glass.g,
         b = glass.b,
         a = glass.a,
+        specular = MitosTheme::effective_specular(),
+        rim = MitosTheme::LIQUID_RIM,
+        grain = MitosTheme::LIQUID_GRAIN,
     );
 
     let program = renderer.compile_custom_pixel_shader(
@@ -516,6 +563,7 @@ void main() {{
         smithay::backend::renderer::element::Kind::Unspecified,
     ))
 }
+
 
 // ============================================================================
 // GENERIC GLASS PANEL RENDERING
@@ -700,12 +748,12 @@ pub fn collect_dock_elements(
 // ============================================================================
 // DOCK ICONS
 // ============================================================================
-
 fn collect_dock_icon_elements(
     panel: &GlassPanel,
     layout: &crate::desktop::DockLayout,
     renderer: &mut GlesRenderer,
     scale: Scale<f64>,
+    pointer_x: f64,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
 
@@ -713,56 +761,33 @@ fn collect_dock_icon_elements(
         return elements;
     }
 
-    let icon_size = layout.icon_size.max(1);
-    let spacing = layout.spacing.max(0);
+    let icon_size = layout.icon_size.max(1) as f32;
+    let spacing = layout.spacing.max(0) as f32;
+    let sigma = icon_size * 2.2;
+    let max_mag = MitosTheme::DOCK_MAGNIFICATION;
 
-    let total_width =
-        (layout.items.len() as i32 * icon_size)
-        + ((layout.items.len().saturating_sub(1) as i32) * spacing);
+    // ------------------------------------------------
+    // Gaussian magnification around the pointer
+    // ------------------------------------------------
+    let scales: Vec<f32> = layout
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let center_x =
+                panel.position.0 as f32 + i as f32 * (icon_size + spacing) + icon_size * 0.5;
+            let dist = pointer_x as f32 - center_x;
+            let influence = (-(dist * dist) / (2.0 * sigma * sigma)).exp();
+            1.0 + max_mag * influence
+        })
+        .collect();
 
-    let start_x =
-        panel.position.0
-        + ((panel.size.0 - total_width) / 2).max(0);
+    // Base (non-magnified) centered layout
+    let total_width = (layout.items.len() as f32 * icon_size)
+        + ((layout.items.len().saturating_sub(1)) as f32 * spacing);
 
-    let center_y =
-        panel.position.1
-        + ((panel.size.1 - icon_size) / 2).max(0);
+    let start_x = panel.position.
 
-    for (index, item) in layout.items.iter().enumerate() {
-        let x =
-            start_x
-            + index as i32 * (icon_size + spacing);
-
-        let y = center_y;
-
-        let color = if item.active {
-            MitosTheme::effective_accent()
-        } else {
-            MitosTheme::GLASS_LIGHT
-        };
-
-        let buffer = SolidColorBuffer::new(
-            (icon_size, icon_size),
-            Color32F::new(
-                color.r,
-                color.g,
-                color.b,
-                color.a,
-            ),
-        );
-
-        elements.extend(
-            buffer.render_elements(
-                renderer,
-                (x, y).into(),
-                scale,
-                1.0,
-            ),
-        );
-    }
-
-    elements
-}
 // ============================================================================
 // COMPLETE MITOS SHELL
 // ============================================================================
