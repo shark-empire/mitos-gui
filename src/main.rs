@@ -65,7 +65,41 @@ const OUTPUT_NAME: &str = "MITOS-0";
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI");
     println!("==========");
+
+    // --------------------------------------------------------
+    // Production backend selection.
+    //
+    // mitos-gui.service will use: ExecStart=/usr/bin/mitos-gui --drm
+    // --------------------------------------------------------
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|a| a == "--drm") {
+        match drm_backend::probe_drm() {
+            Ok(probe) => {
+                println!(
+                    "MITOS GUI: DRM bring-up OK on {} ({} output(s))",
+                    probe.node,
+                    probe.connected.len()
+                );
+
+                println!(
+                    "MITOS GUI: Phase 2 (DrmCompositor frame loop) pending"
+                );
+
+                // Phase 1 is a capability probe; exit cleanly so the
+                // service can fall back until Phase 2 lands.
+                return Ok(());
+            }
+
+            Err(err) => {
+                eprintln!("MITOS GUI: DRM bring-up failed: {err}");
+                return Err(err);
+            }
+        }
+    }
+
     println!("Initializing Wayland compositor...");
+
 
     tracing_subscriber::fmt::init();
 
