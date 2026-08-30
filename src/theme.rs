@@ -103,6 +103,31 @@ impl MitosTheme {
     // ------------------------------------------------------------
 
     pub const ANIMATION_MS: u64 = 180;
+
+        // ------------------------------------------------------------
+    // LIQUID GLASS
+    // ------------------------------------------------------------
+
+    /// Strength of the top light specular sweep (0.0 - 1.0).
+    pub const LIQUID_SPECULAR: f32 = 0.50;
+
+    /// Strength of the fresnel rim light at panel edges.
+    pub const LIQUID_RIM: f32 = 0.45;
+
+    /// Subtle surface grain so the glass doesn't look flat.
+    pub const LIQUID_GRAIN: f32 = 0.015;
+
+    /// How strongly dock icons magnify near the pointer (0.0 - 1.0).
+    pub const DOCK_MAGNIFICATION: f32 = 0.55;
+
+    /// Effective specular respecting runtime theme.
+    pub fn effective_specular() -> f32 {
+        match Self::runtime() {
+            Some(rt) if !rt.dark_mode => Self::LIQUID_SPECULAR * 0.8,
+            _ => Self::LIQUID_SPECULAR,
+        }
+    }
+
 }
 
 // ============================================================================
