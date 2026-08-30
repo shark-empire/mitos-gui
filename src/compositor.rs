@@ -211,16 +211,16 @@ impl CompositorHandler for MitosGuiState {
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
 
-        // Keep the window's tracked bounding box in sync with whatever
-        // buffer it just committed. Without this, Space's idea of a
-        // window's size goes stale the moment a client resizes.
         if let Some(window) = window_for_surface(&self.space, surface) {
             window.on_commit();
+            
+            // Tell the main loop that a client updated its buffer
+            self.pending_full_redraw = true; 
         }
 
         self.popups.commit(surface);
     }
-}
+
 
 // ============================================================
 // OUTPUT
