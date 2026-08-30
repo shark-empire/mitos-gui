@@ -3,6 +3,8 @@
 use crate::desktop::HomeScreenConfig;
 use crate::renderer::GlassPanel;
 use crate::wm::InteractiveAction;
+use crate::shell_interaction::AppEntry;
+
 
 
 use smithay::{
@@ -170,6 +172,10 @@ pub struct MitosGuiState {
     /// Active interactive move/resize gesture.
     pub interactive: Option<InteractiveAction>,
 
+    /// Discovered applications for the launcher.
+    pub launcher_apps: Vec<AppEntry>,
+
+
     /// Set by the config watcher; consumed by the main loop to force
     /// a full redraw and shader recompile after a live config reload.
     pub pending_full_redraw: bool,
@@ -252,6 +258,12 @@ impl MitosGuiState {
             focused_window: None,
             minimized: Vec::new(),
             interactive: None,
+
+            focused_window: None,
+            minimized: Vec::new(),
+            interactive: None,
+            launcher_apps: crate::shell_interaction::discover_apps(),
+
 
             pending_full_redraw: false,
         }
