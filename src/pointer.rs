@@ -445,40 +445,15 @@ _under_pointer(
 /// Convert the window underneath the the window underneath the pointer into
 /// pointer into
 /// the WlSurface the WlSurface required by Smithay required by Smithay's pointer focus.'s pointer focus.
-fn pointer_focus
-fn pointer_focus(
-    state(
-    state: &Mitos: &MitosGuiState,
-GuiState,
-) -> Option<() -> Option<(
-    smithay
-    smithay::reexports::::reexports::wayland_server::wayland_server::protocol::wl_surfaceprotocol::wl_surface::WlSurface,
-    Point::WlSurface,
-    Point<f64,<f64, Logical>,
-)> Logical>,
-)> {
-    let {
-    let window = window_under window = window_under_pointer(state)?;_pointer(state)?;
-
-    let surface
-
-    let surface = window
-        = window
-        .wl_surface()? .wl_surface()?
-        .into
-        .into_owned();
-
-   _owned();
-
-    Some((
-        Some((
-        surface,
-        surface,
-        state.pointer_location, state.pointer_location,
-    ))
-
-    ))
+fn pointer_focus(state: &MitosGuiState)
+    -> Option<(WlSurface, Point<f64, Logical>)>
+{
+    let (window, location) =
+        state.space.element_under(state.pointer_location)?;
+    let surface = window.wl_surface()?.into_owned();
+    Some((surface, location))
 }
+
 
 
 /// Check if the pointer is over a dock icon and return its ID.
