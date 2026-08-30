@@ -626,26 +626,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // renderer.rs owns the actual panel rendering.
                     //
 
-                    let shell_elements =
-                        renderer::collect_shell_elements(
-                            renderer,
-                            &state.shell,
-                            &state.shell.dock_layout,
+let shell_elements =
+    renderer::collect_shell_elements(
+        renderer,
+        &state.shell,
+        &state.shell.dock_layout,
+        (state.pointer_location.x, state.pointer_location.y),
 
-                            &mut top_bar_glass,
-                            &mut launcher_glass,
-                            &mut dock_glass,
+        &mut top_bar_glass,
+        &mut launcher_glass,
+        &mut dock_glass,
 
-                            &top_bar_shadow_buffer,
-                            &top_bar_highlight_buffer,
-                            &top_bar_border_buffer,
+        &top_bar_shadow_buffer,
+        &top_bar_highlight_buffer,
+        &top_bar_border_buffer,
 
-                            &dock_shadow_buffer,
-                            &dock_highlight_buffer,
-                            &dock_border_buffer,
+        &dock_shadow_buffer,
+        &dock_highlight_buffer,
+        &dock_border_buffer,
 
-                            scale,
-                        );
+        scale,
+    );
+
 
                     // ------------------------------------------------
                     // SHELL + CLIENT WINDOWS
