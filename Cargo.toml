@@ -18,6 +18,7 @@ wayland-protocols = { version = "0.32", features = ["server"] }
 calloop = "0.14"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+ab_glyph = "0.2"
 
 image = { version = "0.25", default-features = false, features = ["png"] }
 notify = "6"
