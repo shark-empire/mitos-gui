@@ -960,3 +960,16 @@ pub fn collect_frame_elements(
 
     Ok(elements)
 }
+
+/// Render the top bar clock text (placeholder - real text rendering needs font support).
+pub fn render_top_bar_clock(
+    _renderer: &mut GlesRenderer,
+    _panel: &GlassPanel,
+    _scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    // Text rendering requires a font atlas or Pango integration.
+    // For now, we'll just return empty and rely on the shell_interaction
+    // module to provide the time string to a future text renderer.
+    Vec::new()
+}
+
