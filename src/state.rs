@@ -51,6 +51,10 @@ pub struct MitosShell {
     pub launcher_query: String,
     pub launcher_results: Vec<AppEntry>,
     pub launcher_selected: usize,
+
+    /// Set by the DRM vblank handler; consumed by the DRM main loop.
+    pub drm_vblank: bool,
+
 }
 
 impl MitosShell {
