@@ -13,6 +13,7 @@ mod theme;
 mod wm;
 mod notify;
 mod text;
+mod drm_backend;
 
 use std::sync::Arc;
 use std::time::Duration;
