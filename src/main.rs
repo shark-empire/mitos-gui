@@ -73,30 +73,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --------------------------------------------------------
     let args: Vec<String> = std::env::args().collect();
 
+    let args: Vec<String> = std::env::args().collect();
+
     if args.iter().any(|a| a == "--drm") {
-        match drm_backend::probe_drm() {
-            Ok(probe) => {
-                println!(
-                    "MITOS GUI: DRM bring-up OK on {} ({} output(s))",
-                    probe.node,
-                    probe.connected.len()
-                );
-
-                println!(
-                    "MITOS GUI: Phase 2 (DrmCompositor frame loop) pending"
-                );
-
-                // Phase 1 is a capability probe; exit cleanly so the
-                // service can fall back until Phase 2 lands.
-                return Ok(());
-            }
-
-            Err(err) => {
-                eprintln!("MITOS GUI: DRM bring-up failed: {err}");
-                return Err(err);
-            }
-        }
+        // Production path:
+        // libseat -> DRM -> GBM -> EGL -> vblank frame loop.
+        return drm_backend::run_drm();
     }
+
 
     println!("Initializing Wayland compositor...");
 
