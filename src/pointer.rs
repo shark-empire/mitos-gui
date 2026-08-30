@@ -177,7 +177,7 @@ MotionEvent {
 /// Handle pointer
 
 /// Handle pointer button presses/releases. button presses/releases.
-pub fn handle_pointer_button<B:
+
 pub fn handle_pointer_button<B: InputBackend>(
  InputBackend>(
     state: &    state: &mut MitosGuimut MitosGuiState,
@@ -222,17 +222,29 @@ Released => ButtonState::Released,
 
     // ------------------------------------------------------------
 
-    if matches!(    if matches!(button_state, Buttonbutton_state, ButtonState::Released)State::Released) {
-        if {
+     if matches!(button_state, Buttonbutton_state, ButtonState::Released)State::Released) {
+    
         if state.interactive.is state.interactive.is_some() {
-_some() {
-            crate::wm            crate::wm::end_interactive::end_interactive(state);
-           (state);
+
+            crate::wm::end_interactive::end_interactive(state);
+           
             return;
-        return;
+        
         }
-    } }
+ }
+    
+        // ------------------------------------------------------------
+    // Dock icon click.
+    // ------------------------------------------------------------
+
+    if matches!(button_state, ButtonState::Pressed) && button == BTN_LEFT {
+        if let Some(app_id) = dock_icon_under_pointer(state) {
+            crate::shell_interaction::launch_app(state, app_id);
+            return;
+        }
     }
+
+                
 
     // ------------------------------------------------------------
 
@@ -467,3 +479,44 @@ GuiState,
 
     ))
 }
+
+
+/// Check if the pointer is over a dock icon and return its ID.
+fn dock_icon_under_pointer(
+    state: &MitosGuiState,
+) -> Option<&'static str> {
+    let dock = state.shell.dock.as_ref()?;
+    let layout = &state.shell.dock_layout;
+
+    if layout.items.is_empty() {
+        return None;
+    }
+
+    let pointer = state.pointer_location;
+    let icon_size = layout.icon_size as f64;
+    let spacing = layout.spacing as f64;
+
+    let total_width = (layout.items.len() as f64 * icon_size)
+        + ((layout.items.len().saturating_sub(1)) as f64 * spacing);
+
+    let start_x = dock.position.0 as f64
+        + ((dock.size.0 as f64 - total_width) / 2.0).max(0.0);
+
+    let baseline = (dock.position.1 + dock.size.1 - 8) as f64;
+
+    for (index, item) in layout.items.iter().enumerate() {
+        let x = start_x + index as f64 * (icon_size + spacing);
+        let y = baseline - icon_size;
+
+        if pointer.x >= x
+            && pointer.x <= x + icon_size
+            && pointer.y >= y
+            && pointer.y <= y + icon_size
+        {
+            return Some(item.id);
+        }
+    }
+
+    None
+}
+
