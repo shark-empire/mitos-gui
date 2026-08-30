@@ -717,37 +717,22 @@ pub fn collect_dock_elements(
     border_buffer: &SolidColorBuffer,
     renderer: &mut GlesRenderer,
     scale: Scale<f64>,
+    pointer_x: f64,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = collect_glass_panel_elements(
-        panel,
-        glass_panel,
-        shadow_buffer,
-        highlight_buffer,
-        border_buffer,
-        renderer,
-        scale,
+        panel, glass_panel, shadow_buffer, highlight_buffer,
+        border_buffer, renderer, scale,
     );
 
-    // ------------------------------------------------------------
-    // DOCK ICONS
-    // ------------------------------------------------------------
-
-    elements.extend(
-        collect_dock_icon_elements(
-            panel,
-            layout,
-            renderer,
-            scale,
-        ),
-    );
+    elements.extend(collect_dock_icon_elements(
+        panel, layout, renderer, scale, pointer_x,
+    ));
 
     elements
 }
 
 
-// ============================================================================
-// DOCK ICONS
-// ============================================================================
+
 fn collect_dock_icon_elements(
     panel: &GlassPanel,
     layout: &crate::desktop::DockLayout,
@@ -786,7 +771,44 @@ fn collect_dock_icon_elements(
     let total_width = (layout.items.len() as f32 * icon_size)
         + ((layout.items.len().saturating_sub(1)) as f32 * spacing);
 
-    let start_x = panel.position.
+    let start_x = panel.position.0 as f32
+        + ((panel.size.0 as f32 - total_width) / 2.0).max(0.0);
+
+    // Icons grow upward from a baseline near the dock bottom
+    let baseline = (panel.position.1 + panel.size.1 - 8) as f32;
+
+    for (index, item) in layout.items.iter().enumerate() {
+        let s = scales[index];
+        let size_i = (icon_size * s) as i32;
+
+        let x = (start_x
+            + index as f32 * (icon_size + spacing)
+            + icon_size * (1.0 - s) * 0.5) as i32;
+
+        let y = (baseline - size_i as f32) as i32;
+
+        let color = if item.active {
+            MitosTheme::effective_accent()
+        } else {
+            MitosTheme::GLASS_LIGHT
+        };
+
+        let buffer = SolidColorBuffer::new(
+            (size_i, size_i),
+            Color32F::new(color.r, color.g, color.b, color.a),
+        );
+
+        elements.extend(buffer.render_elements(
+            renderer,
+            (x, y).into(),
+            scale,
+            1.0,
+        ));
+    }
+
+    elements
+}
+
 
 // ============================================================================
 // COMPLETE MITOS SHELL
@@ -803,6 +825,7 @@ pub fn collect_shell_elements(
     renderer: &mut GlesRenderer,
     shell: &crate::state::MitosShell,
     dock_layout: &crate::desktop::DockLayout,
+    pointer: (f64, f64),
 
     top_bar_glass: &mut PixelShaderElement,
     launcher_glass: &mut PixelShaderElement,
@@ -862,20 +885,13 @@ if shell.launcher_visible {
 // DOCK
 // ------------------------------------------------------------
 
-if let Some(panel) = shell.dock.as_ref() {
-    elements.extend(
-        collect_dock_elements(
-            panel,
-            dock_layout,
-            dock_glass,
-            dock_shadow,
-            dock_highlight,
-            dock_border,
-            renderer,
-            scale,
-        ),
-    );
-}
+    if let Some(panel) = shell.dock.as_ref() {
+        elements.extend(collect_dock_elements(
+            panel, dock_layout, dock_glass,
+            dock_shadow, dock_highlight, dock_border,
+            renderer, scale, pointer.0,
+        ));
+    }
 
     elements
 }
