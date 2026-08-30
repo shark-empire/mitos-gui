@@ -1,198 +1,469 @@
 //! MITOS pointer input.
 //!
-//! Stage 3:
+//! Stage 3 & 4:
 //! - track the compositor pointer position
-//! - find the window underneath the pointer
-//! - focus the window on button press
-//! - forward pointer events to the focused Wayland surface
-//!
-//! Stage 4 will add:
-//! - window dragging
-//! - resizing
-//! - decorations
-//! - launcher interaction
-//! - dock interaction
+//! - track the compositor pointer position
+//! - find
+//! - find the window underneath the the window underneath the pointer
+//! - pointer
+//! - focus the window on focus the window on button press
+//! - forward pointer events button press
+//! - forward pointer events to the focused Way to the focused Wayland surface
+//!land surface
+//! - Stage 4 - Stage 4: window dragging (: window dragging (Super + left-dSuper + left-drag)
+//!rag)
+//! - Stage 4 - Stage 4: window resizing (: window resizing (Super + right-dSuper + right-drag)
 
-use smithay::backend::input::{
-    AbsolutePositionEvent,
+userag)
+
+use smithay::backend smithay::backend::input::{
+::input::{
+    AbsolutePositionEvent    AbsolutePositionEvent,
     Axis,
+    Axis,
+    Button,
     ButtonState,
+   State,
+    Event,
     Event,
     InputBackend,
-    PointerAxisEvent,
+ InputBackend,
+    PointerAxisEvent    PointerAxisEvent,
+    Pointer,
     PointerButtonEvent,
+ButtonEvent,
 };
 
-use smithay::input::pointer::{
+use smith};
+
+use smithay::input::ay::input::pointer::{
+   pointer::{
     AxisFrame,
+    ButtonEvent, AxisFrame,
     ButtonEvent,
+    MotionEvent,
     MotionEvent,
 };
 
-use smithay::output::Output;
+use
+};
 
-use smithay::utils::{
+use smithay::output smithay::output::Output;
+
+::Output;
+
+use smithay::use smithay::utils::{
+   utils::{
+    Logical,
+    Point,
     Logical,
     Point,
     SERIAL_COUNTER,
+ SERIAL_COUNTER,
 };
 
-use smithay::wayland::seat::WaylandFocus;
+use smith};
 
-use crate::state::MitosGuiState;
+use smithay::waylanday::wayland::seat::Way::seat::WaylandFocus;
 
-/// Handle absolute pointer motion.
+landFocus;
+
+use crate::stateuse crate::state::MitosGui::MitosGuiState;
+
+///State;
+
+/// Linux input button codes Linux input button codes.
+const BTN.
+const BTN_LEFT: u3_LEFT: u32 = 02 = 0x110x110;
+const BTN;
+const BTN_RIGHT: u3_RIGHT: u32 = 02 = 0x111x111;
+
+
+/// Handle;
+
+
+/// Handle absolute pointer motion. absolute pointer motion.
 ///
-/// Winit reports the pointer position as a normalized
-/// coordinate in the range 0.0..=1.0. Convert it into
+///
+///
+/// Winit reports the Winit reports the pointer position as a pointer position as a normalized
+/// coordinate normalized
+/// coordinate in the range  in the range 0.0..0.0..=1.0=1.0. Convert it into. Convert it into
+/// the logical
 /// the logical output coordinates used by MITOS.
-pub fn handle_pointer_motion_absolute<B: InputBackend>(
-    state: &mut MitosGuiState,
-    output: &Output,
-    event: B::PointerMotionAbsoluteEvent,
+ output coordinates used by MITOS.
+pub fn handle_pointerpub fn handle_pointer_motion_absolute<B:_motion_absolute<B: InputBackend>(
+ InputBackend>(
+    state: &    state: &mut MitosGuimut MitosGuiState,
+   State,
+    output: &Output output: &Output,
+    event,
+    event: B::Pointer: B::PointerMotionAbsoluteEvent,MotionAbsoluteEvent,
 ) {
-    let size = output
+
+) {
+    let size =    let size = output
+        . output
         .current_mode()
-        .map(|mode| mode.size)
-        .unwrap_or_else(|| (1, 1).into());
+current_mode()
+        .map(|        .map(|mode| mode.sizemode| mode.size)
+        .)
+        .unwrap_or_else(||unwrap_or_else(|| (1, 1).into()); (1, 1).into());
 
-    let position = event.position();
+    let position
 
-    let x = position.x * size.w as f64;
-    let y = position.y * size.h as f64;
+    let position = event.position(); = event.position();
 
-    state.pointer_location =
-        Point::<f64, Logical>::from((x, y));
+    let x
 
-    let Some(pointer) = state.seat.get_pointer() else {
+    let x = position.x * = position.x * size.w as f size.w as f64;
+64;
+    let y =    let y = position.y * size position.y * size.h as f6.h as f64;
+
+   4;
+
+    state.pointer_location = state.pointer_location =
+        Point::
+        Point::<f64,<f64, Logical>::from(( Logical>::from((x, y));x, y));
+
+    // Interactive
+
+    // Interactive move/resize follows move/resize follows the pointer.
+ the pointer.
+    if state.inter    if state.interactive.is_some()active.is_some() {
+        crate {
+        crate::wm::update::wm::update_interactive(state);
+    }
+
+_interactive(state);
+    }
+
+    let Some(pointer    let Some(pointer) = state.se) = state.seat.get_pointer()at.get_pointer() else {
+        else {
         return;
+    return;
     };
 
-    let serial = SERIAL_COUNTER.next_serial();
+    let };
 
-    let focus = pointer_focus(state);
+    let serial = SERIAL_COUNTER serial = SERIAL_COUNTER.next_serial();
+
+.next_serial();
+
+    let focus =    let focus = pointer_focus(state); pointer_focus(state);
+
+    pointer.motion
 
     pointer.motion(
+        state(
         state,
         focus,
+        focus,
+        &,
         &MotionEvent {
-            location: state.pointer_location,
+MotionEvent {
+            location: state            location: state.pointer_location,
+.pointer_location,
             serial,
-            time: event.time_msec(),
+            serial,
+            time: event            time: event.time_msec(),.time_msec(),
+        },
+
         },
     );
+}    );
 }
 
-/// Handle pointer button presses/releases.
+/// Handle pointer
+
+/// Handle pointer button presses/releases. button presses/releases.
+pub fn handle_pointer_button<B:
 pub fn handle_pointer_button<B: InputBackend>(
-    state: &mut MitosGuiState,
-    event: B::PointerButtonEvent,
+ InputBackend>(
+    state: &    state: &mut MitosGuimut MitosGuiState,
+   State,
+    event: B:: event: B::PointerButtonEvent,PointerButtonEvent,
 ) {
-    let Some(pointer) = state.seat.get_pointer() else {
+
+) {
+    let Some(pointer    let Some(pointer) = state.se) = state.seat.get_pointer()at.get_pointer() else {
+        else {
         return;
+    return;
     };
 
-    let serial = SERIAL_COUNTER.next_serial();
+    let };
 
-    let button = event.button_code();
+    let serial = SERIAL_COUNTER serial = SERIAL_COUNTER.next_serial();
+.next_serial();
+    let button =    let button = event.button_code(); event.button_code();
 
-    let button_state = match event.state() {
-        ButtonState::Pressed => ButtonState::Pressed,
-        ButtonState::Released => ButtonState::Released,
+    let button
+
+    let button_state = match event_state = match event.state() {
+.state() {
+        ButtonState::        ButtonState::Pressed => ButtonStatePressed => ButtonState::Pressed,
+::Pressed,
+        ButtonState::        ButtonState::Released => ButtonState::Released,
+Released => ButtonState::Released,
     };
 
-    // Find the window underneath the pointer.
-    let under = window_under_pointer(state);
+       };
+
+    let under = window let under = window_under_pointer(state);_under_pointer(state);
 
     // ------------------------------------------------------------
-    // Focus the clicked window.
+
+    // ------------------------------------------------------------
+    // End
+    // End interactive move/resize interactive move/resize on release.
+ on release.
     // ------------------------------------------------------------
 
-    if matches!(button_state, ButtonState::Pressed) {
-        if let Some(window) = under {
-            state.space.raise_element(&window, true);
+    // ------------------------------------------------------------
+
+    if matches!(    if matches!(button_state, Buttonbutton_state, ButtonState::Released)State::Released) {
+        if {
+        if state.interactive.is state.interactive.is_some() {
+_some() {
+            crate::wm            crate::wm::end_interactive::end_interactive(state);
+           (state);
+            return;
+        return;
+        }
+    } }
+    }
+
+    // ------------------------------------------------------------
+
+    // ------------------------------------------------------------
+    // Super
+    // Super + drag = move + drag = move / resize.
+ / resize.
+    // ------------------------------------------------------------
+
+    // ------------------------------------------------------------
+
+    let logo =    let logo = state
+        . state
+        .seat
+        .seat
+        .get_keyboard()
+get_keyboard()
+        .map(|        .map(|k| k.modk| k.modifier_state().logo)
+        .ifier_state().logo)
+        .unwrap_or(false);unwrap_or(false);
+
+    if matches
+
+    if matches!(button_state,!(button_state, ButtonState::Pressed ButtonState::Pressed) && logo {) && logo {
+        if let
+        if let Some(window) = Some(window) = under {
+            under {
+            match button {
+ match button {
+                BTN_LEFT =>                BTN_LEFT => crate::wm:: crate::wm::begin_move(state,begin_move(state, window),
+                window),
+                BTN_RIGHT => crate BTN_RIGHT => crate::wm::begin::wm::begin_resize(state, window_resize(state, window),
+                _),
+                _ => {}
+            => {}
+            }
+
+            // }
+
+            // Swallow Super+ Swallow Super+drag so clients dondrag so clients don't see it.'t see it.
+            return;
+        }
+
+            return;
+        }
+    }
+
+       }
+
+    // ------------------------------------------------------------
+    // ------------------------------------------------------------
+    // Click-to-focus + raise.
+ // Click-to-focus + raise.
+    // ------------------------------------------------------------
+
+    if matches!(    // ------------------------------------------------------------
+
+    if matches!(button_state, Buttonbutton_state, ButtonState::Pressed)State::Pressed) {
+        if {
+        if let Some(window) let Some(window) = under.clone() = under.clone() {
+            state {
+            state.space.raise_element(&.space.raise_element(&window, true);window, true);
+            crate::
+            crate::wm::set_focuswm::set_focus(state, Some(window(state, Some(window));
+        }));
         }
     }
 
     // ------------------------------------------------------------
-    // Forward button event to the focused surface.
+
+    }
+
+    // ------------------------------------------------------------
+    // Forward button    // Forward button event to the focused event to the focused surface.
+    surface.
+    // ------------------------------------------------------------
+
     // ------------------------------------------------------------
 
     pointer.button(
+ pointer.button(
         state,
-        &ButtonEvent {
+        state,
+        &ButtonEvent        &ButtonEvent {
+            button {
             button,
-            state: button_state,
+            state,
+            state: button_state,: button_state,
             serial,
-            time: event.time_msec(),
+            time:
+            serial,
+            time: event.time_msec event.time_msec(),
+        },(),
         },
+    );
+
     );
 }
 
-/// Handle pointer wheel/axis events.
-pub fn handle_pointer_axis<B: InputBackend>(
-    state: &mut MitosGuiState,
-    event: B::PointerAxisEvent,
+/// Handle}
+
+/// Handle pointer wheel/axis pointer wheel/axis events.
+pub events.
+pub fn handle_pointer_axis fn handle_pointer_axis<B: InputBackend<B: InputBackend>(
+    state>(
+    state: &mut Mit: &mut MitosGuiState,osGuiState,
+    event:
+    event: B::PointerAxis B::PointerAxisEvent,
+)Event,
 ) {
-    let Some(pointer) = state.seat.get_pointer() else {
+    let {
+    let Some(pointer) = Some(pointer) = state.seat.get state.seat.get_pointer() else {_pointer() else {
+        return;
         return;
     };
 
-    let mut frame =
-        AxisFrame::new(event.time_msec());
 
-    if let Some(value) =
+    };
+
+    let mut frame    let mut frame =
+        Axis =
+        AxisFrame::new(event.time_msec());Frame::new(event.time_msec());
+
+    if let
+
+    if let Some(value) = Some(value) =
+        event.amount(Axis::Vertical
         event.amount(Axis::Vertical)
     {
-        frame =
-            frame.value(
-                Axis::Vertical,
-                value,
-            );
-    }
-
-    if let Some(value) =
-        event.amount(Axis::Horizontal)
+        frame =)
     {
         frame =
+            frame.value
             frame.value(
-                Axis::Horizontal,
+                Axis(
+                Axis::Vertical,
+::Vertical,
+                value,
                 value,
             );
     }
 
+    if            );
+    }
+
+    if let Some(value) let Some(value) =
+        event =
+        event.amount(Axis::.amount(Axis::Horizontal)
+   Horizontal)
+    {
+        frame {
+        frame =
+            frame =
+            frame.value(
+               .value(
+                Axis::Horizontal, Axis::Horizontal,
+                value,
+                value,
+            );
+
+            );
+    }
+
+       }
+
     pointer.axis(
+ pointer.axis(
+        state,
         state,
         frame,
+        frame,
     );
+}    );
 }
 
-/// Find the topmost MITOS window underneath the pointer.
+/// Find the
+
+/// Find the topmost MITOS window underneath the pointer topmost MITOS window underneath the pointer.
+fn window.
 fn window_under_pointer(
-    state: &MitosGuiState,
-) -> Option<smithay::desktop::Window> {
+_under_pointer(
+    state: &MitosGuiState    state: &MitosGuiState,
+) ->,
+) -> Option<smithay Option<smithay::desktop::Window::desktop::Window> {
+   > {
     state
         .space
-        .element_under(state.pointer_location)
-        .map(|(window, _)| window.clone())
+        . state
+        .space
+        .element_under(state.pointerelement_under(state.pointer_location)
+       _location)
+        .map(|( .map(|(window, _)|window, _)| window.clone())
+ window.clone())
 }
 
-/// Convert the window underneath the pointer into
-/// the WlSurface required by Smithay's pointer focus.
+/// Convert}
+
+/// Convert the window underneath the the window underneath the pointer into
+/// pointer into
+/// the WlSurface the WlSurface required by Smithay required by Smithay's pointer focus.'s pointer focus.
+fn pointer_focus
 fn pointer_focus(
-    state: &MitosGuiState,
-) -> Option<(
-    smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
-    Point<f64, Logical>,
+    state(
+    state: &Mitos: &MitosGuiState,
+GuiState,
+) -> Option<() -> Option<(
+    smithay
+    smithay::reexports::::reexports::wayland_server::wayland_server::protocol::wl_surfaceprotocol::wl_surface::WlSurface,
+    Point::WlSurface,
+    Point<f64,<f64, Logical>,
+)> Logical>,
 )> {
-    let window = window_under_pointer(state)?;
+    let {
+    let window = window_under window = window_under_pointer(state)?;_pointer(state)?;
+
+    let surface
 
     let surface = window
-        .wl_surface()?
+        = window
+        .wl_surface()? .wl_surface()?
+        .into
         .into_owned();
 
+   _owned();
+
     Some((
+        Some((
         surface,
-        state.pointer_location,
+        surface,
+        state.pointer_location, state.pointer_location,
+    ))
+
     ))
 }
