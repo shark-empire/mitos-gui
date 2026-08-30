@@ -1,38 +1,51 @@
 //! Stage 3 & 6 shell interaction.
 //!
 //! Responsibilities:
-//! - dock icon clicks launch applications
+//! - dock icon clicks launch applications (with fallbacks)
 //! - launcher app discovery and search
-//! - top-bar clock and status indicators
-//! - running-app indicators in dock
+//! - top-bar clock and status indicators (UTC for now)
+//! - running-app indicators in dock via XDG app-ids
 
-use std::collections::HashMap;
 use std::process::Command;
-use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use smithay::desktop::Window;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::wayland::seat::WaylandFocus;
 
-use crate::desktop::DockItem;
 use crate::state::MitosGuiState;
 
 // ============================================================================
 // APPLICATION LAUNCHER
 // ============================================================================
 
-/// Launch an application by its dock ID.
+/// Launch an application by its dock ID, trying common fallback binaries.
 pub fn launch_app(state: &mut MitosGuiState, id: &str) {
     let result = match id {
         "launcher" => {
             state.shell.toggle_launcher();
-            Ok(())
+            return;
         }
-        "files" => Command::new("mitos-file-manager").spawn().map(|_| ()),
-        "terminal" => Command::new("weston-terminal").spawn().map(|_| ()),
-        "browser" => Command::new("xdg-open").arg("https://example.com").spawn().map(|_| ()),
-        "settings" => Command::new("mitos-settings").spawn().map(|_| ()),
+        "files" => try_launch(&[
+            "mitos-file-manager",
+            "nautilus",
+            "thunar",
+            "pcmanfm",
+            "dolphin",
+        ]),
+        "terminal" => try_launch(&[
+            "mitos-terminal",
+            "foot",
+            "alacritty",
+            "kitty",
+            "weston-terminal",
+            "xterm",
+        ]),
+        "browser" => try_launch_browser(),
+        "settings" => try_launch(&[
+            "mitos-settings",
+            "gnome-control-center",
+            "xfce4-settings-manager",
+            "cinnamon-settings",
+        ]),
         _ => Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("Unknown app: {id}"),
@@ -45,44 +58,95 @@ pub fn launch_app(state: &mut MitosGuiState, id: &str) {
     }
 }
 
+/// Attempt to spawn one of the provided binaries in order.
+fn try_launch(binaries: &[&str]) -> std::io::Result<()> {
+    for bin in binaries {
+        match Command::new(bin).spawn() {
+            Ok(_) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "None of the fallback binaries could be launched",
+    ))
+}
+
+/// Attempt to spawn a web browser, falling back to xdg-open.
+fn try_launch_browser() -> std::io::Result<()> {
+    let browsers = ["firefox", "chromium-browser", "google-chrome", "epiphany"];
+    for bin in browsers {
+        match Command::new(bin).spawn() {
+            Ok(_) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Command::new("xdg-open").arg("about:blank").spawn().map(|_| ())
+}
+
 // ============================================================================
 // RUNNING APP TRACKING
 // ============================================================================
 
-/// Mark a dock item as running based on window metadata.
+/// Mark a dock item as running based on XDG toplevel app-ids.
 pub fn update_running_state(state: &mut MitosGuiState) {
-    let mut running_apps: HashMap<String, bool> = HashMap::new();
+    let mut running_dock_ids: Vec<&'static str> = Vec::new();
+    let mut active_dock_id: Option<&'static str> = None;
+
+    let focused_app_id = state
+        .focused_window
+        .as_ref()
+        .and_then(|w| app_id_for_window(w));
+
+    if let Some(ref id) = focused_app_id {
+        active_dock_id = dock_id_for_app_id(id);
+    }
 
     // Scan all mapped windows
     for window in state.space.elements() {
-        if let Some(surface) = window.wl_surface() {
-            if let Some(app_id) = get_app_id(&surface) {
-                running_apps.insert(app_id, true);
+        if let Some(app_id) = app_id_for_window(window) {
+            if let Some(dock_id) = dock_id_for_app_id(&app_id) {
+                if !running_dock_ids.contains(&dock_id) {
+                    running_dock_ids.push(dock_id);
+                }
             }
         }
     }
 
     // Update dock layout
     for item in &mut state.shell.dock_layout.items {
-        item.running = running_apps.contains_key(item.id);
-        item.active = state
-            .focused_window
-            .as_ref()
-            .and_then(|w| w.wl_surface())
-            .and_then(|s| get_app_id(&s))
-            .map(|id| id == item.id)
-            .unwrap_or(false);
+        item.running = running_dock_ids.contains(&item.id);
+        item.active = active_dock_id == Some(item.id);
     }
 
     state.pending_full_redraw = true;
 }
 
-/// Extract app ID from a Wayland surface (client sets this).
-fn get_app_id(surface: &WlSurface) -> Option<String> {
-    surface
-        .user_data()
-        .get::<Mutex<String>>()
-        .map(|m| m.lock().unwrap().clone())
+/// Extract the XDG app-id from a window's toplevel surface.
+fn app_id_for_window(window: &Window) -> Option<String> {
+    window
+        .underlying_surface()
+        .wayland()
+        .and_then(|s| s.toplevel())
+        .and_then(|t| t.current_state().app_id.clone())
+}
+
+/// Map an XDG app-id to a MITOS dock ID.
+fn dock_id_for_app_id(app_id: &str) -> Option<&'static str> {
+    let a = app_id.to_ascii_lowercase();
+    if a.contains("file") || a.contains("nautilus") || a.contains("thunar") || a.contains("dolphin") {
+        Some("files")
+    } else if a.contains("terminal") || a.contains("foot") || a.contains("alacritty") || a.contains("kitty") {
+        Some("terminal")
+    } else if a.contains("firefox") || a.contains("chrom") || a.contains("epiphany") {
+        Some("browser")
+    } else if a.contains("settings") || a.contains("control") {
+        Some("settings")
+    } else {
+        None
+    }
 }
 
 // ============================================================================
@@ -90,6 +154,7 @@ fn get_app_id(surface: &WlSurface) -> Option<String> {
 // ============================================================================
 
 /// Get current time as a formatted string.
+/// Note: Uses UTC until a timezone library (e.g. `chrono` or `time`) is added.
 pub fn current_time_string() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -102,18 +167,33 @@ pub fn current_time_string() -> String {
     format!("{hours:02}:{minutes:02}")
 }
 
+/// Convert days since Unix epoch (1970-01-01) to (year, month, day).
+/// Based on Howard Hinnant's civil_from_days algorithm.
+fn civil_from_days(days: i32) -> (i32, u32, u32) {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32; // day of era [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era [0, 399]
+    let y = (yoe as i32) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // day of year [0, 365]
+    let mp = (5 * doy + 2) / 153; // month [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // day [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // month [1, 12]
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
 /// Get current date as a formatted string.
+/// Note: Uses UTC until a timezone library is added.
 pub fn current_date_string() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
 
-    let secs = now.as_secs();
-    let days = (secs / 86400) as u32;
-    let year = 1970 + (days / 365);
-    let day_of_year = days % 365;
-    let month = (day_of_year / 30).min(11) + 1;
-    let day = (day_of_year % 30) + 1;
+    let secs = now.as_secs() as i64;
+    let days = (secs / 86400) as i32;
+    
+    let (year, month, day) = civil_from_days(days);
 
     format!("{year:04}-{month:02}-{day:02}")
 }
@@ -133,24 +213,19 @@ pub struct AppEntry {
 
 /// Scan common XDG application directories for .desktop files.
 pub fn discover_apps() -> Vec<AppEntry> {
-    let mut apps = Vec::new();
-
-    let search_paths = vec![
-        "/usr/share/applications",
-        "/usr/local/share/applications",
-    ];
+    let mut all_paths = Vec::new();
 
     if let Ok(home) = std::env::var("HOME") {
         let user_apps = format!("{home}/.local/share/applications");
         if std::path::Path::new(&user_apps).exists() {
-            // Prepend user path so it's checked first
-            let mut paths = vec![user_apps];
-            paths.extend(search_paths);
-            return discover_apps_in_dirs(&paths);
+            all_paths.push(user_apps);
         }
     }
 
-    discover_apps_in_dirs(&search_paths)
+    all_paths.push("/usr/share/applications".to_string());
+    all_paths.push("/usr/local/share/applications".to_string());
+
+    discover_apps_in_dirs(&all_paths)
 }
 
 fn discover_apps_in_dirs(dirs: &[String]) -> Vec<AppEntry> {
@@ -191,10 +266,17 @@ fn parse_desktop_file(path: &std::path::Path) -> Option<AppEntry> {
             name = line.strip_prefix("Name=").unwrap_or_default().to_string();
         } else if line.starts_with("Exec=") {
             exec = line.strip_prefix("Exec=").unwrap_or_default().to_string();
-            // Strip field codes like %f, %u
-            exec = exec.replace("%f", "").replace("%F", "")
-                       .replace("%u", "").replace("%U", "")
-                       .trim().to_string();
+            // Strip standard field codes like %f, %u, %i, %c, %k
+            exec = exec
+                .replace("%f", "")
+                .replace("%F", "")
+                .replace("%u", "")
+                .replace("%U", "")
+                .replace("%i", "")
+                .replace("%c", "")
+                .replace("%k", "")
+                .trim()
+                .to_string();
         } else if line.starts_with("Icon=") {
             icon = line.strip_prefix("Icon=").unwrap_or_default().to_string();
         } else if line.starts_with("Categories=") {
@@ -245,9 +327,7 @@ pub fn launch_app_entry(entry: &AppEntry) {
         return;
     }
 
-    let result = Command::new(parts[0])
-        .args(&parts[1..])
-        .spawn();
+    let result = Command::new(parts[0]).args(&parts[1..]).spawn();
 
     match result {
         Ok(_) => tracing::info!("MITOS GUI: launched {}", entry.name),
