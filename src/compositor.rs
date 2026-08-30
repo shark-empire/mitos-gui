@@ -54,28 +54,35 @@ use smithay::reexports::wayland_server::protocol::wl_seat;
 
 impl XdgShellHandler for MitosGuiState {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
-        &mut self.xdg_shell_state
+
+        _surface: PopupSurface,        &mut self.xdg_shell_state
     }
 
-  fn new_toplevel(&mut self, surface: ToplevelSurface) {
-    println!("MITOS GUI: new application window");
+    fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        println!("MITOS GUI: new application window");
 
-    surface.with_pending_state(|state| {
-        state.states.set(
-            smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State::Activated
-        );
-    });
+        surface.with_pending_state(|state| {
+            state.states.set(
+                smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State::Activated
+            );
+        });
 
-    surface.send_configure();
+        surface.send_configure();
 
-    let window = Window::new_wayland_window(surface);
-    let position = next_window_position(&self.space);
+        let window = Window::new_wayland_window(surface);
+        let position = next_window_position(&self.space);
 
-    self.space.map_element(window, position, true);
-}
+        self.space.map_element(window.clone(), position, true);
+
+        // Stage 4: Automatically focus new windows
+        crate::wm::set_focus(self, Some(window));
+    }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         println!("MITOS GUI: application window closed");
+
+        // Stage 4: Clean up WM state before unmapping
+        crate::wm::cleanup_destroyed(self, surface.wl_surface());
 
         if let Some(window) = window_for_surface(&self.space, surface.wl_surface()) {
             self.space.unmap_elem(&window);
@@ -97,20 +104,39 @@ impl XdgShellHandler for MitosGuiState {
     fn grab(
         &mut self,
         _surface: PopupSurface,
-        _seat: wl_seat::WlSeat,
+        _seat
+        _seat: wl_seat::: wl_seat::WlSeat,
+        _serialWlSeat,
         _serial: Serial,
     ) {
-        println!("MITOS GUI: popup grab");
+: Serial,
+    ) {
+        println!("MIT        println!("MITOS GUI: popupOS GUI: popup grab");
+    grab");
     }
 
+    fn }
+
     fn reposition_request(
+        &mut reposition_request(
         &mut self,
+        _surface: Popup self,
         _surface: PopupSurface,
+        _positioner:Surface,
         _positioner: PositionerState,
+        _token PositionerState,
         _token: u32,
+    ): u32,
     ) {
+        println!("MITOS GUI {
         println!("MITOS GUI: popup reposition request");
+   : popup reposition request");
     }
+}
+
+
+// ============================================================
+ }
 }
 
 
@@ -118,10 +144,20 @@ impl XdgShellHandler for MitosGuiState {
 // SHM
 // ============================================================
 
-impl ShmHandler for MitosGuiState {
-    fn shm_state(&self) -> &ShmState {
+// SHM
+// ============================================================
+
+impl ShmHandlerimpl ShmHandler for MitosGui for MitosGuiState {
+    fn shm_state(&State {
+    fn shm_state(&self) -> &self) -> &ShmState {ShmState {
+        &self
         &self.shm_state
+.shm_state
     }
+}
+
+
+// ============================================================    }
 }
 
 
@@ -129,85 +165,170 @@ impl ShmHandler for MitosGuiState {
 // BUFFER
 // ============================================================
 
-impl BufferHandler for MitosGuiState {
-    fn buffer_destroyed(
+
+// BUFFER
+// ============================================================
+
+impl BufferHandler for MitosGuiStateimpl BufferHandler for MitosGuiState {
+    fn {
+    fn buffer_destroyed( buffer_destroyed(
         &mut self,
-        _buffer: &wl_buffer::WlBuffer,
+       
+        &mut self,
+        _buffer: & _buffer: &wl_buffer::Wwl_buffer::WlBuffer,
+lBuffer,
+    ) {
     ) {
     }
 }
 
 
+// ============================================================    }
+}
+
+
 // ============================================================
+// COMPOSITOR
+// =================================================
 // COMPOSITOR
 // ============================================================
 
-impl CompositorHandler for MitosGuiState {
-    fn compositor_state(&mut self) -> &mut CompositorState {
+impl Com===========
+
+impl CompositorHandler for MitpositorHandler for MitosGuiState {osGuiState {
+    fn compositor
+    fn compositor_state(&mut self_state(&mut self) -> &mut) -> &mut CompositorState { CompositorState {
+        &mut
         &mut self.compositor_state
     }
 
-    fn client_compositor_state<'a>(
+ self.compositor_state
+    }
+
+    fn client_com    fn client_compositor_state<'apositor_state<'a>(
+        &>(
         &self,
-        client: &'a Client,
-    ) -> &'a CompositorClientState {
+       self,
+        client: &'a client: &'a Client,
+    Client,
+    ) -> &'a ) -> &'a CompositorClientState CompositorClientState {
+        & {
         &client
-            .get_data::<MitosClientState>()
-            .expect("MITOS GUI: missing client state")
+            .client
+            .get_data::<Mget_data::<MitosClientState>()itosClientState>()
+            .expect
+            .expect("MITOS GUI("MITOS GUI: missing client state")
+            .: missing client state")
             .compositor_state
     }
 
-    fn commit(&mut self, surface: &WlSurface) {
-        on_commit_buffer_handler::<Self>(surface);
+   compositor_state
+    }
 
-        // Keep the window's tracked bounding box in sync with whatever
-        // buffer it just committed. Without this, Space's idea of a
-        // window's size goes stale the moment a client resizes.
-        if let Some(window) = window_for_surface(&self.space, surface) {
+    fn commit(&mut fn commit(&mut self, surface: self, surface: &WlSurface) {
+        &WlSurface) {
+        on_commit_buffer_handler on_commit_buffer_handler::<Self>(surface::<Self>(surface);
+
+        //);
+
+        // Keep the window's Keep the window's tracked bounding box in tracked bounding box in sync with whatever
+ sync with whatever
+        // buffer it        // buffer it just committed. Without just committed. Without this, Space's idea of a
+ this, Space's idea of a
+        // window's        // window's size goes stale the size goes stale the moment a client res moment a client resizes.
+       izes.
+        if let Some(window if let Some(window) = window_for) = window_for_surface(&self.space_surface(&self.space, surface) {, surface) {
+            window.on
             window.on_commit();
+       _commit();
         }
 
-        self.popups.commit(surface);
+        self }
+
+        self.popups.commit(surface.popups.commit(surface);
+    }
+}
+
+
+//);
     }
 }
 
 
 // ============================================================
 // OUTPUT
+// ================================================= ============================================================
+// OUTPUT
 // ============================================================
 
+impl OutputHandler for Mitos===========
+
 impl OutputHandler for MitosGuiState {}
+
+
+// ============================================================
+GuiState {}
 
 
 // ============================================================
 // CLIENT STATE
 // ============================================================
 
+// CLIENT STATE
+// ============================================================
+
 #[derive(Default)]
+pub struct Mit#[derive(Default)]
 pub struct MitosClientState {
+    pub compositorosClientState {
     pub compositor_state: CompositorClientState,
+_state: CompositorClientState,
 }
+
+impl ClientData for Mitos}
 
 impl ClientData for MitosClientState {
-    fn initialized(&self, _client_id: ClientId) {
-        println!("MITOS GUI: Wayland client connected");
+    fn initialized(&ClientState {
+    fn initialized(&self, _client_id: ClientIdself, _client_id: ClientId) {
+        println!("MITOS) {
+        println!("MITOS GUI: Wayland GUI: Wayland client connected");
+ client connected");
     }
 
+       }
+
     fn disconnected(
-        &self,
+ fn disconnected(
+        &self,        &self,
+        _client
         _client_id: ClientId,
+        __id: ClientId,
         _reason: DisconnectReason,
+    )reason: DisconnectReason,
     ) {
+        println!("MITOS GUI {
         println!("MITOS GUI: Wayland client disconnected");
+   : Wayland client disconnected");
     }
 }
 
+ }
+}
+
 // ============================================================
-// SMITHAY DELEGATES
+// ============================================================
+// SMITHAY// SMITHAY DELEGATES
+ DELEGATES
 // ============================================================
 
-delegate_xdg_shell!(MitosGuiState);
-delegate_compositor!(MitosGuiState);
-delegate_shm!(MitosGuiState);
-delegate_output!(MitosGuiState);
-delegate_seat!(MitosGuiState);
+// ============================================================
+
+delegate_xdg_shelldelegate_xdg_shell!(MitosGuiState);
+delegate!(MitosGuiState);
+delegate_compositor!(MitosGuiState);_compositor!(MitosGuiState);
+delegate_shm
+delegate_shm!(MitosGui!(MitosGuiState);
+delegateState);
+delegate_output!(Mitos_output!(MitosGuiState);
+GuiState);
+delegate_seat!(Mdelegate_seat!(MitosGuiState);itosGuiState);
