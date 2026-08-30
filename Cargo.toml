@@ -10,8 +10,14 @@ smithay = { version = "0.7", features = [
     "wayland_frontend",
     "desktop",
     "backend_winit",
+    "backend_drm",
+    "backend_gbm",
+    "backend_egl",
+    "backend_session_libseat",
+    "backend_libinput",
     "renderer_gl",
 ] }
+
 
 wayland-protocols = { version = "0.32", features = ["server"] }
 
