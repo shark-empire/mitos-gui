@@ -17,6 +17,8 @@ mod wm;
 mod notifications;
 mod status;
 mod icons;
+mod auth;
+mod session;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -736,7 +738,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &mut window_chrome,      // (From previous step)
                             &state.popups,           // (From previous step)
                             &state.notifications.active, // <--- ADD THIS
-                            top_bar_height,              // <--- ADD THIS
+                            top_bar_height,        // <--- ADD THIS
+                            &state.auth,
                         )?;
 
 
