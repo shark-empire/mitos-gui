@@ -19,6 +19,7 @@ mod status;
 mod icons;
 mod auth;
 mod session;
+mod gestures;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -740,6 +741,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &state.notifications.active, // <--- ADD THIS
                             top_bar_height,        // <--- ADD THIS
                             &state.auth,
+                            state.current_workspace,      // <--- ADD
+                            state.workspace_swipe_x,      // <--- ADD
+                            output_size.w,                // <--- ADD
                         )?;
 
 
