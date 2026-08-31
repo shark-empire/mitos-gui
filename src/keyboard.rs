@@ -47,6 +47,51 @@ pub fn handle_keyboard_key<B: InputBackend>(
             let keysym = sym.modified_sym();
 
             // --------------------------------------------------------
+            // Stage 6: hardware media keys
+            // --------------------------------------------------------
+            if key_state == KeyState::Pressed {
+                match keysym {
+                    keysyms::KEY_XF86AudioRaiseVolume => {
+                        state.muted = false;
+                        state.volume = state.volume.saturating_add(5).min(100);
+                        state.notifications.push(
+                            "MITOS Audio",
+                            &format!("Volume: {}%", state.volume),
+                            "Applied by the audio service in Stage 8.",
+                        );
+                        state.pending_full_redraw = true;
+                        return FilterResult::Intercept(());
+                    }
+
+                    keysyms::KEY_XF86AudioLowerVolume => {
+                        state.muted = false;
+                        state.volume = state.volume.saturating_sub(5);
+                        state.notifications.push(
+                            "MITOS Audio",
+                            &format!("Volume: {}%", state.volume),
+                            "Applied by the audio service in Stage 8.",
+                        );
+                        state.pending_full_redraw = true;
+                        return FilterResult::Intercept(());
+                    }
+
+                    keysyms::KEY_XF86AudioMute => {
+                        state.muted = !state.muted;
+                        state.notifications.push(
+                            "MITOS Audio",
+                            if state.muted { "Muted" } else { "Unmuted" },
+                            "",
+                        );
+                        state.pending_full_redraw = true;
+                        return FilterResult::Intercept(());
+                    }
+
+                    _ => {}
+                }
+            }
+
+
+            // --------------------------------------------------------
             // LAUNCHER SEARCH NAVIGATION
             // If the launcher is open, it captures ALL keyboard input.
             // --------------------------------------------------------
