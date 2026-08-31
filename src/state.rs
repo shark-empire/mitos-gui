@@ -157,6 +157,10 @@ pub struct MitosGuiState {
     /// Set by the config watcher; consumed by the main loop to force
     /// a full redraw and shader recompile after a live config reload.
     pub pending_full_redraw: bool,
+
+    /// Stage 6: Secure authentication prompt.
+    pub auth: crate::auth::AuthPrompt,
+
 }
 
 impl MitosGuiState {
@@ -228,6 +232,8 @@ impl MitosGuiState {
             muted: false,
             last_status_poll: Instant::now(),
             drm_vblank: false,
+
+             auth: crate::auth::AuthPrompt::new(),
             
             launcher_apps,
             pending_full_redraw: false,
