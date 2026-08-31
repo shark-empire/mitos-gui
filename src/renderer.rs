@@ -1168,6 +1168,76 @@ pub fn collect_window_chrome_elements(
     elements
 }
 
+// ============================================================================
+// NOTIFICATIONS (STAGE 6)
+// ============================================================================
+
+pub fn collect_notification_elements(
+    renderer: &mut GlesRenderer,
+    notifications: &[crate::notifications::Notification],
+    output_size: Size<i32, Logical>,
+    top_bar_height: i32,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+    
+    let panel_w = 320;
+    let panel_h = 80;
+    let margin = 12;
+    
+    let start_x = output_size.w - panel_w - margin;
+    let mut current_y = top_bar_height + margin;
+
+    for notif in notifications {
+        // 1. Glass Background (using a translucent solid color for simplicity, 
+        // or you can pass a PixelShaderElement if you want the full liquid glass)
+        let bg_color = crate::theme::MitosTheme::effective_glass();
+        let bg = SolidColorBuffer::new(
+            (panel_w, panel_h),
+            Color32F::new(bg_color.r, bg_color.g, bg_color.b, bg_color.a * 0.85),
+        );
+        
+        elements.extend(bg.render_elements(
+            renderer,
+            (start_x, current_y).into(),
+            scale,
+            1.0,
+        ));
+
+        // 2. Border
+        let border_color = crate::theme::MitosTheme::BORDER;
+        let border = SolidColorBuffer::new(
+            (panel_w, 1),
+            Color32F::new(border_color.r, border_color.g, border_color.b, border_color.a),
+        );
+        elements.extend(border.render_elements(
+            renderer,
+            (start_x, current_y + panel_h - 1).into(),
+            scale,
+            1.0,
+        ));
+
+        // 3. Title Text
+        if let Some(tex) = &notif.title_tex {
+            if let Ok(el) = tex.element(renderer, (start_x + 16, current_y + 16)) {
+                elements.push(ChromeRenderElement::Text(el));
+            }
+        }
+
+        // 4. Body Text
+        if let Some(tex) = &notif.body_tex {
+            if let Ok(el) = tex.element(renderer, (start_x + 16, current_y + 40)) {
+                elements.push(ChromeRenderElement::Text(el));
+            }
+        }
+
+        current_y += panel_h + margin;
+    }
+
+    elements
+}
+
+
 
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
@@ -1179,6 +1249,8 @@ pub fn collect_frame_elements(
     popups: &smithay::desktop::PopupManager,
     shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
     overlay_elements: impl IntoIterator<Item = ChromeRenderElement>,
+    notifications: &[crate::notifications::Notification],
+    top_bar_height: i32,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
@@ -1244,6 +1316,17 @@ pub fn collect_frame_elements(
     elements.extend(
         popups.render_elements(renderer, (0, 0).into(), scale, 1.0)
     );
+        // ------------------------------------------------------------
+    // 4.5 NOTIFICATIONS (STAGE 6)
+    // ------------------------------------------------------------
+    elements.extend(collect_notification_elements(
+        renderer,
+        notifications,
+        output_size,
+        top_bar_height,
+        scale,
+    ));
+
 
     // ------------------------------------------------------------
     // 5. MITOS OVERLAYS (Launcher, etc.)
