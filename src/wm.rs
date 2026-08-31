@@ -44,7 +44,7 @@ impl Default for WindowMeta {
     }
 }
 
-pub fn meta(window: &Window) -> MutexGuard<'_, WindowMeta> {
+pub(crate) fn meta(window: &Window) -> MutexGuard<'_, WindowMeta> {
     window
         .user_data()
         .insert_if_missing(|| Mutex::new(WindowMeta::default()));
