@@ -1370,6 +1370,62 @@ pub fn collect_notification_elements(
 }
 
 
+pub fn collect_auth_elements(
+    renderer: &mut GlesRenderer,
+    auth: &crate::auth::AuthPrompt,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+    if !auth.active { return elements; }
+
+    let w = 400;
+    let h = 220;
+    let x = (output_size.w - w) / 2;
+    let y = (output_size.h - h) / 2;
+
+    // 1. Dim the background (Modal overlay)
+    let dim = SolidColorBuffer::new(output_size, Color32F::new(0.0, 0.0, 0.0, 0.6));
+    elements.extend(dim.render_elements(renderer, (0, 0).into(), scale, 1.0));
+
+    // 2. Glass Panel
+    let bg_color = crate::theme::MitosTheme::effective_glass();
+    let bg = SolidColorBuffer::new((w, h), Color32F::new(bg_color.r, bg_color.g, bg_color.b, 0.95));
+    elements.extend(bg.render_elements(renderer, (x, y).into(), scale, 1.0));
+
+    // 3. Border
+    let border = crate::theme::MitosTheme::BORDER;
+    let b_buf = SolidColorBuffer::new((w, 1), Color32F::new(border.r, border.g, border.b, border.a));
+    elements.extend(b_buf.render_elements(renderer, (x, y + h - 1).into(), scale, 1.0));
+
+    // 4. Password Field Background
+    let field_w = w - 40;
+    let field_h = 40;
+    let field_x = x + 20;
+    let field_y = y + 120;
+    
+    let field_bg = SolidColorBuffer::new((field_w, field_h), Color32F::new(0.0, 0.0, 0.0, 0.3));
+    elements.extend(field_bg.render_elements(renderer, (field_x, field_y).into(), scale, 1.0));
+
+    // 5. Password Dots (Visual representation of typed characters)
+    let dot_color = Color32F::new(1.0, 1.0, 1.0, 1.0);
+    let dot_size = 8;
+    let dot_spacing = 16;
+    
+    for (i, _) in auth.password.chars().enumerate() {
+        if i >= 20 { break; } // Max dots visible
+        
+        let dot_x = field_x + 15 + (i as i32 * dot_spacing);
+        let dot_y = field_y + (field_h / 2) - (dot_size / 2);
+        
+        let dot = SolidColorBuffer::new((dot_size, dot_size), dot_color);
+        elements.extend(dot.render_elements(renderer, (dot_x, dot_y).into(), scale, 1.0));
+    }
+
+    elements
+}
+
+
 
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
@@ -1383,6 +1439,7 @@ pub fn collect_frame_elements(
     overlay_elements: impl IntoIterator<Item = ChromeRenderElement>,
     notifications: &[crate::notifications::Notification],
     top_bar_height: i32,
+    auth: &crate::auth::AuthPrompt,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
@@ -1464,6 +1521,17 @@ pub fn collect_frame_elements(
     // 5. MITOS OVERLAYS (Launcher, etc.)
     // ------------------------------------------------------------
     elements.extend(overlay_elements);
+
+    // ------------------------------------------------------------
+    // 6. SECURE AUTHENTICATION OVERLAY
+    // ------------------------------------------------------------
+    elements.extend(collect_auth_elements(
+        renderer,
+        auth,
+        output_size,
+        scale,
+    ));
+
 
 
     Ok(elements)
