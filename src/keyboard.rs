@@ -73,6 +73,18 @@ pub fn handle_keyboard_key<B: InputBackend>(
                 );
 
                 return FilterResult::Intercept(());
+
+                // Super + N: Push a test notification (Stage 6)
+                if keysym == keysyms::KEY_n.into() {
+                    state.notifications.push(
+                        "MITOS System",
+                        "Notification Engine Active",
+                        "Stage 6 desktop services are online.",
+                    );
+                    state.pending_full_redraw = true;
+                    return FilterResult::Intercept(());
+                }
+
             }
 
             // --------------------------------------------------------
