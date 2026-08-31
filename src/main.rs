@@ -14,6 +14,7 @@ mod surface;
 mod text;
 mod theme;
 mod wm;
+mod notifications;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -543,6 +544,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.pending_full_redraw = true;
         }
 
+
+      // Tick notifications (auto-dismiss expired ones)
+        if state.notifications.tick() {
+            state.pending_full_redraw = true;
+        }
+
         // ========================================================
         // FRAME SCHEDULING & DAMAGE TRACKING
         // ========================================================
@@ -696,17 +703,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         .to_i32_round()
                                 });
 
-    let elements = renderer::collect_frame_elements(
-        renderer,
-        &state.space,
-        scale,
-        &wallpaper,
-        output_size,
-        shell_elements,
-        std::iter::empty(),
-        &mut window_chrome,      // <--- ADD THIS
-        &state.popups,           // <--- ADD THIS
-    )?;
+                        let top_bar_height = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
+
+                        let elements = renderer::collect_frame_elements(
+                            renderer,
+                            &state.space,
+                            scale,
+                            &wallpaper,
+                            output_size,
+                            shell_elements,
+                            std::iter::empty(),
+                            &mut window_chrome,      // (From previous step)
+                            &state.popups,           // (From previous step)
+                            &state.notifications.active, // <--- ADD THIS
+                            top_bar_height,              // <--- ADD THIS
+                        )?;
+
 
 
                         // ------------------------------------------------
