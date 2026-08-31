@@ -1047,6 +1047,9 @@ pub fn collect_shell_elements(
     text: &ShellTextState,
     tray: &TrayState,
 
+    state.current_workspace,
+    state.workspace_count,
+
     scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
@@ -1069,7 +1072,7 @@ pub fn collect_shell_elements(
                 elements.push(ChromeRenderElement::Text(el));
             }
         }
-                // Tray icons, left of the clock
+      // Tray icons, left of the clock
         let clock_w = text
             .clock_texture
             .as_ref()
@@ -1091,6 +1094,25 @@ pub fn collect_shell_elements(
 
             x += tex.size.w + 10;
         }
+
+                // Workspace Dots (Centered in top bar)
+        let dot_size = 6;
+        let dot_spacing = 12;
+        let total_dots_w = (state.workspace_count as i32 * dot_size) + ((state.workspace_count as i32 - 1) * dot_spacing);
+        let mut dot_x = panel.position.0 + (panel.size.0 / 2) - (total_dots_w / 2);
+        let dot_y = panel.position.1 + (panel.size.1 / 2) - (dot_size / 2);
+
+        for i in 0..state.workspace_count {
+            let color = if i == state.current_workspace {
+                crate::theme::MitosTheme::effective_accent()
+            } else {
+                Color32F::new(1.0, 1.0, 1.0, 0.3)
+            };
+            let dot = SolidColorBuffer::new((dot_size, dot_size), color);
+            elements.extend(dot.render_elements(renderer, (dot_x, dot_y).into(), scale, 1.0));
+            dot_x += dot_size + dot_spacing;
+        }
+
 
     }
 
@@ -1440,6 +1462,9 @@ pub fn collect_frame_elements(
     notifications: &[crate::notifications::Notification],
     top_bar_height: i32,
     auth: &crate::auth::AuthPrompt,
+    current_ws: usize,  
+    swipe_x: f64,
+    output_width: i32,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
@@ -1464,39 +1489,33 @@ pub fn collect_frame_elements(
 
 
     // ------------------------------------------------------------
-    // 3. WAYLAND APPLICATION WINDOWS (with Chrome)
+    // 3. WAYLAND APPLICATION WINDOWS (Workspace Aware)
     // ------------------------------------------------------------
-    
-    // We need a mutable chrome cache. 
-    // (In a full implementation, this would be stored in MitosGuiState per-window).
-    // For now, we use a simple static-like approach or pass it in.
-    // Let's assume we add `window_chrome: &mut WindowChrome` to the function signature.
-
     for window in space.elements().rev() {
-        let Some(location) = space.element_location(window) else {
-            continue;
-        };
+        let win_ws = crate::wm::meta(window).workspace;
+        
+        // Calculate relative workspace position
+        let diff = win_ws as i32 - current_ws as i32;
+        
+        // Only render current workspace and immediate neighbors during swipe
+        if diff.abs() > 1 { continue; }
+        
+        let Some(location) = space.element_location(window) else { continue; };
+        
+        // Apply workspace offset + 1:1 swipe tracking
+        let offset_x = (diff as f64 * output_width as f64) + (swipe_x * output_width as f64);
+        let final_loc = Point::from((location.x as f64 + offset_x, location.y as f64));
 
-        // Draw shadow and border BEHIND the window
+        // Draw Chrome (Shadows/Borders)
         elements.extend(collect_window_chrome_elements(
-            renderer, window, location, scale, window_chrome,
+            renderer, window, final_loc.to_i32_round(), scale, window_chrome,
         ));
 
-        // Draw the actual window on top
-        let physical_location = location
-            .to_f64()
-            .to_physical(scale)
-            .to_i32_round();
-
-        elements.extend(
-            window.render_elements(
-                renderer,
-                physical_location,
-                scale,
-                1.0,
-            ),
-        );
+        // Draw Window
+        let physical_location = final_loc.to_physical(scale).to_i32_round();
+        elements.extend(window.render_elements(renderer, physical_location, scale, 1.0));
     }
+
 
     // ------------------------------------------------------------
     // 4. XDG POPUPS (Menus, Tooltips)
