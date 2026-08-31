@@ -46,6 +46,14 @@ pub fn handle_keyboard_key<B: InputBackend>(
         |state, mods, sym| {
             let keysym = sym.modified_sym();
 
+             // --------------------------------------------------------
+            // SECURE AUTHENTICATION PROMPT (Highest Priority)
+            // --------------------------------------------------------
+            if state.auth.active {
+                return handle_auth_input(state, keysym, key_state);
+            }
+
+
             // --------------------------------------------------------
             // Stage 6: hardware media keys
             // --------------------------------------------------------
@@ -119,7 +127,15 @@ pub fn handle_keyboard_key<B: InputBackend>(
 
                 return FilterResult::Intercept(());
 
-                // Super + N: Push a test notification (Stage 6)
+
+            }
+
+            // --------------------------------------------------------
+            // Stage 4 Window Manager shortcuts
+            // --------------------------------------------------------
+            if mods.logo {
+
+             // Super + N: Push a test notification (Stage 6)
                 if keysym == keysyms::KEY_n.into() {
                     state.notifications.push(
                         "MITOS System",
@@ -130,12 +146,18 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     return FilterResult::Intercept(());
                 }
 
-            }
+                // Super + Shift + A: Trigger mock auth prompt
+                if mods.shift && keysym == keysyms::KEY_a.into() {
+                    state.auth.request("MITOS Package Manager", "Install system updates");
+                    state.pending_full_redraw = true;
+                    return FilterResult::Intercept(());
+                }
 
-            // --------------------------------------------------------
-            // Stage 4 Window Manager shortcuts
-            // --------------------------------------------------------
-            if mods.logo {
+                // Super + Shift + R: Reboot via mitos-init
+                if mods.shift && keysym == keysyms::KEY_r.into() {
+                    crate::session::reboot();
+                    return FilterResult::Intercept(());
+                }
                 // Super + Q: Close focused window
                 if keysym == keysyms::KEY_q.into() {
                     crate::wm::close_focused(state);
@@ -262,3 +284,41 @@ pub fn toggle_launcher(state: &mut MitosGuiState) {
     state.shell.toggle_launcher();
     state.pending_full_redraw = true;
 }
+
+fn handle_auth_input(
+    state: &mut MitosGuiState,
+    keysym: u32,
+    key_state: KeyState,
+) -> FilterResult<()> {
+    if key_state != KeyState::Pressed {
+        return FilterResult::Intercept(());
+    }
+
+    match keysym {
+        keysyms::KEY_Escape => {
+            state.auth.cancel();
+            state.notifications.push("MITOS Security", "Authentication cancelled", "");
+        }
+        keysyms::KEY_Return => {
+            if state.auth.submit() {
+                state.notifications.push("MITOS Security", "Authentication successful", "Privileges granted.");
+            } else {
+                state.notifications.push("MITOS Security", "Authentication failed", "Incorrect password.");
+            }
+        }
+        keysyms::KEY_BackSpace => {
+            state.auth.password.pop();
+        }
+        _ => {
+            if let Some(c) = keysym_to_char(keysym) {
+                if c.is_ascii_graphic() || c == ' ' {
+                    state.auth.password.push(c);
+                }
+            }
+        }
+    }
+
+    state.pending_full_redraw = true;
+    FilterResult::Intercept(())
+}
+
