@@ -1,90 +1,55 @@
-# mitos-gui
+# MITOS GUI 🪟
 
-Lightweight, modern Wayland compositor and desktop shell for MITOS, built
-on [Smithay](https://github.com/Smithay/smithay).
+**MITOS GUI** is the modern, Wayland-based graphical desktop environment and compositor for **mitosOS**. Built from the ground up in Rust using the [Smithay](https://github.com/Smithay/smithay) framework, it provides a highly polished, secure, and performant desktop experience featuring a signature "liquid glass" visual identity, workspace management, and native hardware acceleration.
 
-The window-management and drawing policy — glass panels, blur, rounded
-corners, the whole MITOS look — is deliberately *not* something Wayland
-or Smithay provide for free. Smithay is a compositor framework, not a
-compositor; every visual decision below Stage 3 is ours to make, in
-`renderer.rs` and (later) `theme.rs`/`desktop.rs`, not something
-"Wayland gives you."
+![Rust](https://img.shields.io/badge/Rust-1.70+-orange?logo=rust)
+![Wayland](https://img.shields.io/badge/Wayland-Compositor-blue?logo=wayland)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## Status
+---
 
-**Stage 2 (renderer) complete.** `mitos-gui` is a real, runnable
-compositor: it opens a window via winit, renders every mapped client
-into it through a GLES2 context with damage tracking, and forwards host
-keyboard/mouse input to clients (including a basic click-to-focus
-policy). There's no visual identity yet — Stage 3 is what makes it look
-like MITOS instead of a bare desktop — and no window management beyond
-"new windows cascade, clicking raises and focuses." Every fix so far is
-tracked stage-by-stage below.
+## 🏗️ Current Architecture & Status
 
-## Building & running
+MITOS GUI has advanced rapidly through the industry-level roadmap. It is no longer just a foundational compositor; it is a **functional desktop environment** with workspace management, hardware-backed rendering, system services, and native input gestures.
 
-```sh
-cargo run
-```
+### ✅ What is Integrated & Working
 
-This launches `mitos-gui` as a windowed (winit) Wayland compositor —
-useful for development, since it runs nested inside your existing
-desktop session rather than needing a spare TTY. Point a Wayland client
-at the socket it prints on startup, e.g.:
+#### 🖥️ Compositor & Window Management (Stage 1 & 4)
+*   **Wayland Core:** Full Smithay 0.7 integration, XDG shell lifecycle, SHM buffers, and surface damage tracking.
+*   **Workspaces:** Virtual desktop support, window-to-workspace assignment, and workspace switching via keyboard shortcuts.
+*   **Window Manager:** Move, resize, snap (left/right half), maximize, fullscreen, and minimize. Includes smart focus fallback and drag-to-unmaximize.
+*   **Client-Driven State:** Fully handles XDG client requests for state changes (maximize, fullscreen, minimize).
 
-```sh
-WAYLAND_DISPLAY=<socket-name-from-startup-log> weston-terminal
-```
+#### 🎨 Visual Shell & Renderer (Stage 2 & 3)
+*   **GLES2 Rendering:** GPU-accelerated damage tracking (`OutputDamageTracker`) and frame scheduling.
+*   **Liquid Glass:** Advanced theme properties including specular highlights, translucent tints, and rounded corner masks.
+*   **Native Rasterization:** Custom CPU glyph rasterization (`text.rs`) and procedural icon generation (`icons.rs`)—no external UI toolkit dependencies.
+*   **Workspace UI:** Visual workspace dots and overview rendering.
+*   **Live Configuration:** `inotify`-based watcher (`config_watcher.rs`) for instant reloading of `~/.config/mitos/home.conf` (themes, wallpapers, panel sizes).
 
-System dependencies (Debian/Ubuntu package names — see `ci.yml` for the
-full list): `libwayland-dev`, `libxkbcommon-dev`, `libegl1-mesa-dev`,
-`libgl1-mesa-dev`, plus the DRM/GBM/libinput/libseat dev packages Stage
-5 will need.
+#### ⌨️ Input & Gestures (Stage 5)
+*   **Touchpad Gestures:** Native swipe gesture engine for fluid workspace switching.
+*   **Keyboard Shortcuts:** Global shortcuts for window management, workspace navigation, and app launching.
+*   **Pointer Routing:** Surface-local coordinate tracking, click-to-focus, and discrete scroll wheel support.
 
-## Roadmap
+#### ⚙️ System Services & Hardware (Stage 6 & 11)
+*   **DRM/KMS Backend:** Phase 2 production backend (`drm_backend.rs`) with `libseat` integration for bare-metal TTY execution.
+*   **Session Management:** Native hooks for `reboot`, `poweroff`, and `halt` (`session.rs`).
+*   **Authentication:** Integrated auth prompt system for polkit/sudo requests (`auth.rs`).
+*   **Notifications:** Desktop notification engine (`notifications.rs`).
+*   **Supervisor Integration:** `send_ready` notification for systemd/s6 service managers (`notify.rs`).
 
-**Stage 1 — compositor foundation** ✅
-Wayland socket, client connections, XDG surfaces, output, seat globals.
+---
 
-**Stage 2 — renderer** ✅
-GLES2 GPU rendering via a winit-backed EGL context, damage tracking
-(`OutputDamageTracker`), and frame scheduling (clients are told when
-their last frame was presented, so well-behaved ones throttle redraws
-to the output's refresh rate instead of spinning). Basic keyboard and
-pointer input, including click-to-focus, came along for the ride here
-too — a renderer you can't click into isn't very testable.
+## 🚀 Building & Running
 
-**Stage 3 — MITOS visual shell**
-Glass panels, translucent surfaces, rounded corners, shadows, wallpaper,
-top bar, launcher. All of this is renderer/shell-level compositing
-policy — new render elements and shaders in `renderer.rs`, driven by
-the design tokens already sitting in `theme.rs` — not a Wayland
-protocol feature.
+### Prerequisites
+MITOS GUI requires a Linux environment with the following native development libraries:
 
-**Stage 4 — window manager**
-Move, resize, maximize, minimize, workspaces, keyboard shortcuts. Builds
-on `pointer.rs`'s existing click-to-focus/raise plumbing and
-`keyboard.rs`'s currently-empty filter hook.
-
-**Stage 5 — hardware**
-DRM, GBM, libseat, real keyboard/mouse via libinput, real display
-output, booting directly into MITOS instead of nesting inside a host
-session. `input.rs`'s dispatcher and `renderer.rs`'s element collection
-are both already written against the generic `InputBackend`/`GlesRenderer`
-types specifically so this swap doesn't require touching either file.
-
-## Project layout
-
-```
-src/
-├── main.rs         — entry point: backend init, main loop, frame lifecycle
-├── compositor.rs    — Wayland protocol handlers (XDG shell, SHM, compositor, output)
-├── state.rs         — MitosGuiState: the one struct everything hangs off
-├── renderer.rs       — GLES rendering, damage tracking, render-element collection
-├── surface.rs        — Window <-> Space bridging helpers
-├── input.rs          — raw InputEvent dispatch
-├── keyboard.rs        — keyboard event -> seat forwarding
-├── pointer.rs          — pointer motion/button/axis, click-to-focus
-├── theme.rs            — MITOS design tokens (colors, radii, spacing)
-└── animation.rs        — (Stage 3)
-```
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install -y pkg-config libudev-dev libinput-dev libseat-dev \
+    libgbm-dev libdrm-dev libegl1-mesa-dev libgl1-mesa-dev libpixman-1-dev \
+    libxkbcommon-dev libwayland-dev wayland-protocols libxcb1-dev \
+    libxcb-composite0-dev libxcb-xfixes0-dev libxcb-render0-dev \
+    libxcb-shm0-dev libxcb-xkb-dev
