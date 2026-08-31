@@ -204,6 +204,31 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     crate::wm::cycle_focus(state);
                     return FilterResult::Intercept(());
                 }
+
+                // Super + 1/2/3/4: Switch Workspace
+                if keysym == keysyms::KEY_1.into() { state.switch_workspace(0); return FilterResult::Intercept(()); }
+                if keysym == keysyms::KEY_2.into() { state.switch_workspace(1); return FilterResult::Intercept(()); }
+                if keysym == keysyms::KEY_3.into() { state.switch_workspace(2); return FilterResult::Intercept(()); }
+                if keysym == keysyms::KEY_4.into() { state.switch_workspace(3); return FilterResult::Intercept(()); }
+
+                // Super + Shift + 1/2/3/4: Move focused window to Workspace
+                if mods.shift {
+                    if let Some(win) = state.focused_window.clone() {
+                        let target = match keysym {
+                            keysyms::KEY_1 => Some(0),
+                            keysyms::KEY_2 => Some(1),
+                            keysyms::KEY_3 => Some(2),
+                            keysyms::KEY_4 => Some(3),
+                            _ => None,
+                        };
+                        if let Some(t) = target {
+                            crate::wm::meta(&win).workspace = t;
+                            state.switch_workspace(t); // Follow the window
+                            return FilterResult::Intercept(());
+                        }
+                    }
+                }
+
             }
 
             // --------------------------------------------------------
