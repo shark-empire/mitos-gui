@@ -46,6 +46,23 @@ MITOS GUI has advanced rapidly through the industry-level roadmap. It is no long
 ### Prerequisites
 MITOS GUI requires a Linux environment with the following native development libraries:
 
+
+🗺️ Roadmap: What’s Next?
+While the core desktop experience is functional, the following areas remain to achieve full industry-ready status:
+🔥 Immediate Priorities
+	1.	True Frosted Glass (Stage 3): Implement multi-pass Gaussian blur shaders and render-target background capture to replace current liquid glass tints with true frosted blur.
+	2.	Multi-Monitor & HiDPI (Stage 1/2): Hotplugging displays, per-monitor fractional scaling, and independent workspace mapping per output.
+	3.	Layer Shell Protocol (Stage 1): Implement  wlr-layer-shell  to support standard Wayland status bars, overlays, and lock screens.
+🛠️ Mid-Term Goals
+	•	System Integration (Stage 7 & 8): File manager drag-and-drop, full network/audio/bluetooth UI integration, and MIME-type handling.
+	•	Security & Sandboxing (Stage 9): Strict Wayland protocol security policies, clipboard privacy controls, and screencopy permissions.
+	•	Accessibility (Stage 10): High-contrast themes, screen reader hooks, and keyboard navigation focus rings.
+🏭 Long-Term Vision
+	•	Application Ecosystem (Stage 12): Native MITOS applications (Terminal, Settings, Text Editor) and a robust compatibility layer for existing Linux apps.
+	•	Reliability & CI (Stage 14 & 15): Automated QEMU graphical testing, Wayland protocol compliance tests, and reproducible release builds.
+
+
+
 **Ubuntu/Debian:**
 ```bash
 sudo apt-get install -y pkg-config libudev-dev libinput-dev libseat-dev \
