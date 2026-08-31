@@ -15,6 +15,8 @@ mod text;
 mod theme;
 mod wm;
 mod notifications;
+mod status;
+mod icons;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -386,6 +388,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     let mut shell_text = renderer::ShellTextState::new();
     
+    let mut tray = renderer::TrayState::new();
+
+    
     // NEW: Window shadow/border cache
     let mut window_chrome = renderer::WindowChrome::new(); 
 
@@ -543,6 +548,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if shell_text.refresh(&state.shell) {
             state.pending_full_redraw = true;
         }
+        
+        if state.poll_status_if_due() {
+            state.pending_full_redraw = true;
+        }
+
+        if tray.refresh(
+            &state.network,
+            &state.battery,
+            state.volume,
+            state.muted,
+        ) {
+            state.pending_full_redraw = true;
+        }
+
 
 
       // Tick notifications (auto-dismiss expired ones)
@@ -683,6 +702,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 &dock_border_buffer,
 
                                 &shell_text,
+                                &tray,
 
                                 scale,
                             );
