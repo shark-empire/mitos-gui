@@ -5,6 +5,7 @@ use crate::renderer::GlassPanel;
 use crate::shell_interaction::AppEntry;
 use crate::wm::InteractiveAction;
 
+use std::time::{Duration, Instant};
 use smithay::{
     desktop::{PopupManager, Space, Window},
     input::{
@@ -51,10 +52,6 @@ pub struct MitosShell {
     pub launcher_query: String,
     pub launcher_results: Vec<AppEntry>,
     pub launcher_selected: usize,
-
-    /// Set by the DRM vblank handler; consumed by the DRM main loop.
-    pub drm_vblank: bool,
-
 }
 
 impl MitosShell {
@@ -101,89 +98,58 @@ impl MitosShell {
 // ============================================================================
 
 /// Global state for the MITOS compositor.
-///
-/// This is the central state object shared by:
-///
-/// - the Wayland compositor
-/// - XDG shell
-/// - input handling
-/// - window management
-/// - renderer
-/// - MITOS shell
-/// - desktop/background
 pub struct MitosGuiState {
     // ------------------------------------------------------------------------
     // Wayland protocol state
     // ------------------------------------------------------------------------
-
-    /// Wayland compositor state.
     pub compositor_state: CompositorState,
-
-    /// XDG shell state.
     pub xdg_shell_state: XdgShellState,
-
-    /// Shared-memory buffer state.
     pub shm_state: ShmState,
 
     // ------------------------------------------------------------------------
     // Input
     // ------------------------------------------------------------------------
-
-    /// Wayland seat state.
     pub seat_state: SeatState<Self>,
-
-    /// MITOS seat containing keyboard and pointer capabilities.
     pub seat: Seat<Self>,
 
     // ------------------------------------------------------------------------
     // MITOS shell
     // ------------------------------------------------------------------------
-
-    /// Visual shell state.
     pub shell: MitosShell,
 
     // ------------------------------------------------------------------------
     // Output
     // ------------------------------------------------------------------------
-
-    /// Current compositor output.
     pub output: Output,
 
     // ------------------------------------------------------------------------
     // Desktop
     // ------------------------------------------------------------------------
-
-    /// Home-screen and wallpaper configuration.
     pub home_screen: HomeScreenConfig,
-
-    /// Desktop space containing outputs and client windows.
     pub space: Space<Window>,
-
-    /// XDG popup manager.
     pub popups: PopupManager,
 
     // ------------------------------------------------------------------------
     // Pointer / timing
     // ------------------------------------------------------------------------
-
-    /// Current pointer position in logical coordinates.
     pub pointer_location: Point<f64, Logical>,
-
-    /// Monotonic compositor clock.
     pub clock: Clock<Monotonic>,
-
-    /// Currently focused window.
     pub focused_window: Option<Window>,
-
-    /// Minimized windows (most recent last).
     pub minimized: Vec<Window>,
-
-    /// Active interactive move/resize gesture.
     pub interactive: Option<InteractiveAction>,
 
-
-    /// Stage 6: Notification engine.
+    // ------------------------------------------------------------------------
+    // Stage 6: System Services
+    // ------------------------------------------------------------------------
     pub notifications: crate::notifications::NotificationManager,
+    pub network: crate::status::NetworkStatus,
+    pub battery: Option<crate::status::BatteryStatus>,
+    pub volume: u8,
+    pub muted: bool,
+    pub last_status_poll: Instant,
+
+    /// Set by the DRM vblank handler; consumed by the DRM main loop.
+    pub drm_vblank: bool,
 
     /// Discovered applications for the launcher.
     pub launcher_apps: Vec<AppEntry>,
@@ -234,8 +200,6 @@ impl MitosGuiState {
         // Pre-populate launcher results so it's ready immediately when opened
         shell.launcher_results = launcher_apps.clone();
 
-         notifications: crate::notifications::NotificationManager::new(),
-
         // ------------------------------------------------------------
         // Global state
         // ------------------------------------------------------------
@@ -255,15 +219,42 @@ impl MitosGuiState {
             focused_window: None,
             minimized: Vec::new(),
             interactive: None,
+            
+            // Stage 6 Services
+            notifications: crate::notifications::NotificationManager::new(),
+            network: crate::status::NetworkStatus::Offline,
+            battery: None,
+            volume: 70,
+            muted: false,
+            last_status_poll: Instant::now(),
+            drm_vblank: false,
+            
             launcher_apps,
             pending_full_redraw: false,
-            
         }
     }
 
+    /// Re-poll kernel status every 5 seconds.
+    /// Returns true if anything changed (triggers a redraw).
+    pub fn poll_status_if_due(&mut self) -> bool {
+        if self.last_status_poll.elapsed() < Duration::from_secs(5) {
+            return false;
+        }
+
+        self.last_status_poll = Instant::now();
+
+        let net = crate::status::poll_network();
+        let bat = crate::status::poll_battery();
+
+        let changed = net != self.network || bat != self.battery;
+
+        self.network = net;
+        self.battery = bat;
+
+        changed
+    }
+
     /// Reload ~/.config/mitos/home.conf and recompute the shell.
-    ///
-    /// Called from the config-watcher channel when the file changes.
     pub fn reload_configuration(&mut self) {
         println!("MITOS GUI: home.conf changed, reloading configuration");
 
@@ -297,12 +288,10 @@ impl SeatHandler for MitosGuiState {
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
-    /// Return the compositor's seat state.
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
     }
 
-    /// Called whenever keyboard/pointer focus changes.
     fn focus_changed(
         &mut self,
         _seat: &Seat<Self>,
@@ -311,7 +300,6 @@ impl SeatHandler for MitosGuiState {
         // Handled by wm::set_focus
     }
 
-    /// Called when a client changes its cursor image.
     fn cursor_image(
         &mut self,
         _seat: &Seat<Self>,
