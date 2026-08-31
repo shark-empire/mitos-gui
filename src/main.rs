@@ -379,12 +379,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             backend.renderer(),
         )?;
 
-    let mut dock_glass =
+    let mut dock_glass = 
         renderer::create_glass_panel_element(
-            backend.renderer(),
+            backend.renderer()
         )?;
-
     let mut shell_text = renderer::ShellTextState::new();
+    
+    // NEW: Window shadow/border cache
+    let mut window_chrome = renderer::WindowChrome::new(); 
+
 
     // ============================================================
     // FULL REDRAW & READINESS FLAGS
@@ -693,15 +696,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         .to_i32_round()
                                 });
 
-                        let elements = renderer::collect_frame_elements(
-                            renderer,
-                            &state.space,
-                            scale,
-                            &wallpaper,
-                            output_size,
-                            shell_elements,
-                            std::iter::empty(),
-                        )?;
+    let elements = renderer::collect_frame_elements(
+        renderer,
+        &state.space,
+        scale,
+        &wallpaper,
+        output_size,
+        shell_elements,
+        std::iter::empty(),
+        &mut window_chrome,      // <--- ADD THIS
+        &state.popups,           // <--- ADD THIS
+    )?;
+
 
                         // ------------------------------------------------
                         // DAMAGE TRACKER
