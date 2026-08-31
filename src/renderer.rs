@@ -1034,12 +1034,149 @@ pub fn collect_shell_elements(
 }
 
 
+// ============================================================================
+// WINDOW CHROME (SHADOWS & BORDERS)
+// ============================================================================
+
+/// Generate a soft drop-shadow image on the CPU.
+/// We use a simple distance-field approach for speed.
+fn generate_shadow_image(
+    width: i32, 
+    height: i32, 
+    radius: f32, 
+    spread: f32,
+    color: (u8, u8, u8, u8)
+) -> image::RgbaImage {
+    let w = width.max(1) as u32;
+    let h = height.max(1) as u32;
+    let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([0, 0, 0, 0]));
+    
+    let (r, g, b, a) = color;
+    let cx = w as f32 / 2.0;
+    let cy = h as f32 / 2.0;
+    let inner_w = (w as f32 - spread * 2.0).max(0.0) / 2.0;
+    let inner_h = (h as f32 - spread * 2.0).max(0.0) / 2.0;
+
+    for y in 0..h {
+        for x in 0..w {
+            let dx = (x as f32 - cx).abs() - inner_w;
+            let dy = (y as f32 - cy).abs() - inner_h;
+            
+            let dist = if dx > 0.0 && dy > 0.0 {
+                (dx * dx + dy * dy).sqrt()
+            } else {
+                dx.max(dy)
+            };
+
+            if dist < radius {
+                let alpha = (1.0 - (dist / radius)) * (a as f32 / 255.0);
+                let alpha_u8 = (alpha * 255.0).clamp(0.0, 255.0) as u8;
+                img.put_pixel(x, y, image::Rgba([r, g, b, alpha_u8]));
+            }
+        }
+    }
+    img
+}
+
+/// Caches the window shadow texture so we don't regenerate it every frame.
+pub struct WindowChrome {
+    shadow_buffer: Option<MemoryRenderBuffer>,
+    shadow_size: Size<i32, Logical>,
+}
+
+impl WindowChrome {
+    pub fn new() -> Self {
+        Self {
+            shadow_buffer: None,
+            shadow_size: Size::from((0, 0)),
+        }
+    }
+
+    /// Ensure the shadow texture matches the requested size.
+    pub fn ensure_shadow(&mut self, width: i32, height: i32) {
+        // Add padding for the shadow spread
+        let pad = 24; 
+        let sw = width + pad * 2;
+        let sh = height + pad * 2;
+
+        if self.shadow_size.w == sw && self.shadow_size.h == sh {
+            return;
+        }
+
+        let img = generate_shadow_image(sw, sh, 16.0, 8.0, (0, 0, 0, 180));
+        let size = Size::<i32, Logical>::new(sw, sh);
+        
+        let buffer = MemoryRenderBuffer::from_slice(
+            img.as_raw(),
+            Fourcc::Abgr8888,
+            size,
+            1,
+            Transform::Normal,
+            Some(vec![Rectangle::from_size(size)]),
+        );
+
+        self.shadow_buffer = Some(buffer);
+        self.shadow_size = size;
+    }
+}
+
+/// Wrap a Wayland window with MITOS shadows and borders.
+pub fn collect_window_chrome_elements(
+    renderer: &mut GlesRenderer,
+    window: &Window,
+    location: Point<i32, Logical>,
+    scale: Scale<f64>,
+    chrome: &mut WindowChrome,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+    let geo = window.geometry();
+    
+    // 1. Shadow
+    chrome.ensure_shadow(geo.size.w, geo.size.h);
+    if let Some(buf) = &chrome.shadow_buffer {
+        let pad = 24;
+        let shadow_loc = Point::from((location.x - pad, location.y - pad));
+        
+        if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            shadow_loc.to_f64(),
+            buf,
+            Some(1.0),
+            None,
+            None,
+            Kind::Unspecified,
+        ) {
+            elements.push(ChromeRenderElement::Wallpaper(el)); // Reusing Wallpaper variant for Memory buffers
+        }
+    }
+
+    // 2. Window Border (1px solid accent/glass border)
+    let border_color = crate::theme::MitosTheme::BORDER;
+    let border_buf = SolidColorBuffer::new(
+        (geo.size.w + 2, geo.size.h + 2),
+        Color32F::new(border_color.r, border_color.g, border_color.b, border_color.a * 0.5),
+    );
+    
+    let border_loc = Point::from((location.x - 1, location.y - 1));
+    elements.extend(border_buf.render_elements(
+        renderer,
+        border_loc,
+        scale,
+        1.0,
+    ));
+
+    elements
+}
+
+
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
     scale: Scale<f64>,
     wallpaper: &Wallpaper,
     output_size: Size<i32, Logical>,
+    window_chrome: &mut WindowChrome,
+    popups: &smithay::desktop::PopupManager,
     shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
     overlay_elements: impl IntoIterator<Item = ChromeRenderElement>,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
@@ -1063,17 +1200,28 @@ pub fn collect_frame_elements(
 
     elements.extend(shell_elements);
 
+
+
     // ------------------------------------------------------------
-    // 3. WAYLAND APPLICATION WINDOWS
+    // 3. WAYLAND APPLICATION WINDOWS (with Chrome)
     // ------------------------------------------------------------
+    
+    // We need a mutable chrome cache. 
+    // (In a full implementation, this would be stored in MitosGuiState per-window).
+    // For now, we use a simple static-like approach or pass it in.
+    // Let's assume we add `window_chrome: &mut WindowChrome` to the function signature.
 
     for window in space.elements().rev() {
-        let Some(location) =
-            space.element_location(window)
-        else {
+        let Some(location) = space.element_location(window) else {
             continue;
         };
 
+        // Draw shadow and border BEHIND the window
+        elements.extend(collect_window_chrome_elements(
+            renderer, window, location, scale, window_chrome,
+        ));
+
+        // Draw the actual window on top
         let physical_location = location
             .to_f64()
             .to_physical(scale)
@@ -1090,11 +1238,18 @@ pub fn collect_frame_elements(
     }
 
     // ------------------------------------------------------------
-    // 4. MITOS OVERLAYS
-    //    Launcher, dialogs, etc.
+    // 4. XDG POPUPS (Menus, Tooltips)
     // ------------------------------------------------------------
+    // Smithay's PopupManager tracks popup geometry. We render them here.
+    elements.extend(
+        popups.render_elements(renderer, (0, 0).into(), scale, 1.0)
+    );
 
+    // ------------------------------------------------------------
+    // 5. MITOS OVERLAYS (Launcher, etc.)
+    // ------------------------------------------------------------
     elements.extend(overlay_elements);
+
 
     Ok(elements)
 }
