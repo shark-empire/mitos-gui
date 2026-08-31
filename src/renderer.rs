@@ -906,6 +906,114 @@ impl ShellTextState {
     }
 }
 
+// ============================================================================
+// SYSTEM TRAY STATE (STAGE 6)
+// ============================================================================
+
+const TRAY_COLOR: (u8, u8, u8, u8) = (228, 233, 244, 255);
+
+/// Caches rasterized tray icons; re-rasterizes only on status change.
+pub struct TrayState {
+    net_key: (u8, u8),
+    net_tex: Option<crate::text::TextTexture>,
+
+    vol_key: (u8, bool),
+    vol_tex: Option<crate::text::TextTexture>,
+
+    bat_key: (u8, u8, bool),
+    bat_tex: Option<crate::text::TextTexture>,
+}
+
+impl TrayState {
+    pub fn new() -> Self {
+        Self {
+            net_key: (255, 255),
+            net_tex: None,
+            vol_key: (255, false),
+            vol_tex: None,
+            bat_key: (255, 0, false),
+            bat_tex: None,
+        }
+    }
+
+    pub fn refresh(
+        &mut self,
+        network: &crate::status::NetworkStatus,
+        battery: &Option<crate::status::BatteryStatus>,
+        volume: u8,
+        muted: bool,
+    ) -> bool {
+        use crate::status::NetworkStatus;
+
+        let mut changed = false;
+
+        let nk = match network {
+            NetworkStatus::Offline => (0u8, 0u8),
+            NetworkStatus::Ethernet => (1, 0),
+            NetworkStatus::Wifi(l) => (2, *l),
+        };
+
+        if nk != self.net_key {
+            self.net_key = nk;
+
+            let img = match network {
+                NetworkStatus::Offline =>
+                    crate::icons::wifi_icon(18, 0, (150, 155, 165, 255)),
+                NetworkStatus::Ethernet =>
+                    crate::icons::ethernet_icon(18, TRAY_COLOR),
+                NetworkStatus::Wifi(l) =>
+                    crate::icons::wifi_icon(18, 1 + l / 34, TRAY_COLOR),
+            };
+
+            self.net_tex = crate::text::TextTexture::from_rgba(img);
+            changed = true;
+        }
+
+        let vk = (volume, muted);
+
+        if vk != self.vol_key {
+            self.vol_key = vk;
+            self.vol_tex = crate::text::TextTexture::from_rgba(
+                crate::icons::volume_icon(18, volume, muted, TRAY_COLOR),
+            );
+            changed = true;
+        }
+
+        let bk = match battery {
+            Some(b) => (1u8, b.capacity, b.charging),
+            None => (0, 0, false),
+        };
+
+        if bk != self.bat_key {
+            self.bat_key = bk;
+            self.bat_tex = battery.map(|b| {
+                crate::text::TextTexture::from_rgba(
+                    crate::icons::battery_icon(b.capacity, b.charging, TRAY_COLOR),
+                )
+            });
+            changed = true;
+        }
+
+        changed
+    }
+
+    pub fn total_width(&self) -> i32 {
+        let mut w = 0;
+        let mut n = 0;
+
+        for t in [&self.net_tex, &self.vol_tex, &self.bat_tex]
+            .into_iter()
+            .flatten()
+        {
+            w += t.size.w;
+            n += 1;
+        }
+
+        if n > 0 { w + (n - 1) * 10 } else { 0 }
+    }
+}
+
+
 
 // ============================================================================
 // COMPLETE MITOS SHELL
@@ -937,6 +1045,7 @@ pub fn collect_shell_elements(
     dock_border: &SolidColorBuffer,
 
     text: &ShellTextState,
+    tray: &TrayState,
 
     scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
@@ -960,6 +1069,29 @@ pub fn collect_shell_elements(
                 elements.push(ChromeRenderElement::Text(el));
             }
         }
+                // Tray icons, left of the clock
+        let clock_w = text
+            .clock_texture
+            .as_ref()
+            .map(|t| t.size.w)
+            .unwrap_or(0);
+
+        let mut x = panel.position.0 + panel.size.0
+            - 12 - clock_w - 16 - tray.total_width();
+
+        let cy = panel.position.1 + panel.size.1 / 2;
+
+        for tex in [&tray.net_tex, &tray.vol_tex, &tray.bat_tex]
+            .into_iter()
+            .flatten()
+        {
+            if let Ok(el) = tex.element(renderer, (x, cy - tex.size.h / 2)) {
+                elements.push(ChromeRenderElement::Text(el));
+            }
+
+            x += tex.size.w + 10;
+        }
+
     }
 
     // ------------------------------------------------------------
