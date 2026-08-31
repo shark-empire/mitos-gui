@@ -11,6 +11,7 @@ use smithay::output::Output;
 use crate::keyboard::handle_keyboard_key;
 use crate::pointer::{handle_pointer_axis, handle_pointer_button, handle_pointer_motion_absolute};
 use crate::state::MitosGuiState;
+use crate::gestures; 
 
 pub fn process_input_event<B: InputBackend>(state: &mut MitosGuiState, output: &Output, event: InputEvent<B>) {
     match event {
@@ -23,6 +24,10 @@ pub fn process_input_event<B: InputBackend>(state: &mut MitosGuiState, output: &
         // Relative motion, gestures, touch, tablet, device hotplug --
         // winit's virtual device never produces these, and a real
         // source for them (libinput) doesn't exist until Stage 5.
+                // --- STAGE 5: TOUCHPAD GESTURES ---
+        InputEvent::SwipeGestureBegin { event } => gestures::handle_swipe_begin::<B>(state, event),
+        InputEvent::SwipeGestureUpdate { event } => gestures::handle_swipe_update::<B>(state, event),
+        InputEvent::SwipeGestureEnd { event } => gestures::handle_swipe_end::<B>(state, event),
         _ => {}
     }
 }
