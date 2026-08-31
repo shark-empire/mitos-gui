@@ -181,6 +181,10 @@ pub struct MitosGuiState {
     /// Active interactive move/resize gesture.
     pub interactive: Option<InteractiveAction>,
 
+
+    /// Stage 6: Notification engine.
+    pub notifications: crate::notifications::NotificationManager,
+
     /// Discovered applications for the launcher.
     pub launcher_apps: Vec<AppEntry>,
 
@@ -230,6 +234,8 @@ impl MitosGuiState {
         // Pre-populate launcher results so it's ready immediately when opened
         shell.launcher_results = launcher_apps.clone();
 
+         notifications: crate::notifications::NotificationManager::new(),
+
         // ------------------------------------------------------------
         // Global state
         // ------------------------------------------------------------
@@ -251,6 +257,7 @@ impl MitosGuiState {
             interactive: None,
             launcher_apps,
             pending_full_redraw: false,
+            
         }
     }
 
