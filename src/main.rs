@@ -2,18 +2,18 @@ mod animation;
 mod compositor;
 mod config_watcher;
 mod desktop;
+mod drm_backend;
 mod input;
 mod keyboard;
+mod notify;
 mod pointer;
 mod renderer;
 mod shell_interaction;
 mod state;
 mod surface;
+mod text;
 mod theme;
 mod wm;
-mod notify;
-mod text;
-mod drm_backend;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,17 +73,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --------------------------------------------------------
     let args: Vec<String> = std::env::args().collect();
 
-    let args: Vec<String> = std::env::args().collect();
-
     if args.iter().any(|a| a == "--drm") {
         // Production path:
         // libseat -> DRM -> GBM -> EGL -> vblank frame loop.
         return drm_backend::run_drm();
     }
 
-
     println!("Initializing Wayland compositor...");
-
 
     tracing_subscriber::fmt::init();
 
@@ -388,16 +384,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             backend.renderer(),
         )?;
 
-    
-
     let mut shell_text = renderer::ShellTextState::new();
 
-
     // ============================================================
-    // FULL REDRAW
+    // FULL REDRAW & READINESS FLAGS
     // ============================================================
 
     let mut full_redraw_frames: u8 = 4;
+    let mut ready_sent = false;
 
     println!("MITOS GUI: compositor initialized");
     println!("MITOS GUI: XDG shell initialized");
@@ -406,14 +400,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI: Stage 3 shell initialized");
     println!("MITOS GUI: event loop running");
 
-
-
-    println!("MITOS GUI: Stage 3 shell initialized");
-    
-    // Tell mitos-init we are ready to render
-    notify::send_ready(); 
-
-    println!("MITOS GUI: event loop running");
     // ============================================================
     // MAIN LOOP
     // ============================================================
@@ -550,9 +536,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Re-rasterize clock / launcher text if it changed
-if shell_text.refresh(&state.shell) {
-    state.pending_full_redraw = true;
-}
+        if shell_text.refresh(&state.shell) {
+            state.pending_full_redraw = true;
+        }
 
         // ========================================================
         // FRAME SCHEDULING & DAMAGE TRACKING
@@ -625,11 +611,6 @@ if shell_text.refresh(&state.shell) {
                         border.a,
                     ),
                 );
-
-                state.shell.top_bar =
-                    Some(panel);
-            } else {
-                state.shell.top_bar = None;
             }
 
             // ============================================================
@@ -672,10 +653,6 @@ if shell_text.refresh(&state.shell) {
                         // ------------------------------------------------
                         // MITOS SHELL
                         // ------------------------------------------------
-                        //
-                        // renderer.rs owns the actual panel rendering.
-                        //
-
                         let shell_elements =
                             renderer::collect_shell_elements(
                                 renderer,
@@ -767,6 +744,13 @@ if shell_text.refresh(&state.shell) {
                             tracing::warn!(
                                 "MITOS GUI: failed to submit frame: {err}"
                             );
+                        } else {
+                            // First real frame on screen -> tell
+                            // mitos-init the session is genuinely ready.
+                            if !ready_sent {
+                                ready_sent = true;
+                                notify::send_ready();
+                            }
                         }
                     }
 
