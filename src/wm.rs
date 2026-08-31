@@ -30,9 +30,21 @@ pub struct WindowMeta {
     pub saved: Option<Rectangle<i32, Logical>>,
     pub maximized: bool,
     pub fullscreen: bool,
+    pub workspace: usize,
 }
 
-fn meta(window: &Window) -> MutexGuard<'_, WindowMeta> {
+impl Default for WindowMeta {
+    fn default() -> Self {
+        Self {
+            saved: None,
+            maximized: false,
+            fullscreen: false,
+            workspace: 0,
+        }
+    }
+}
+
+pub fn meta(window: &Window) -> MutexGuard<'_, WindowMeta> {
     window
         .user_data()
         .insert_if_missing(|| Mutex::new(WindowMeta::default()));
