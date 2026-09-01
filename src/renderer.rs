@@ -13,6 +13,7 @@
 //!
 //! Wayland itself does not provide the MITOS glass effect.
 //! The visual shell is deliberately implemented here.
+pub mod frosted_glass;
 
 use smithay::{
     backend::{
@@ -43,6 +44,39 @@ use smithay::{
 
 use crate::desktop::HomeScreenConfig;
 use crate::theme::MitosTheme;
+
+
+/// Captures the current scene (wallpaper + windows) into an offscreen texture.
+pub fn capture_background(
+    renderer: &mut GlesRenderer,
+    output_size: Size<i32, Physical>,
+    elements: &[impl Element<GlesRenderer>],
+) -> Result<GlesTexture, Box<dyn std::error::Error>> {
+    // 1. Create offscreen buffer
+    let mut bg_texture = renderer.create_buffer(Fourcc::Abgr8888, output_size)?;
+    let mut target = renderer.bind(&mut bg_texture)?;
+    
+    // 2. Render elements to the offscreen target
+    // We use a simple damage tracker or just render everything
+    let mut tracker = smithay::backend::renderer::damage::OutputDamageTracker::new(
+        output_size, 1.0, Transform::Normal
+    );
+    
+    smithay::backend::renderer::damage::render_output(
+        renderer,
+        &mut target,
+        &mut tracker,
+        0,
+        [0.0, 0.0, 0.0, 1.0].into(), // Clear color
+        elements.iter(),
+    )?;
+
+    // 3. Unbind
+    drop(target);
+    
+    Ok(bg_texture)
+}
+
 
 // ============================================================================
 // GLASS PANEL
