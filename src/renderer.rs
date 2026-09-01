@@ -1465,6 +1465,7 @@ pub fn collect_frame_elements(
     current_ws: usize,  
     swipe_x: f64,
     output_width: i32,
+    osd: &crate::state::OsdState,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
@@ -1535,11 +1536,33 @@ pub fn collect_frame_elements(
         scale,
     ));
 
+// --- ON-SCREEN DISPLAY (OSD) ---
+if osd.active && osd.last_updated.elapsed().as_secs() < 2 {
+    let (pill_w, pill_h) = (200, 48);
+    let x = (output_size.w - pill_w) / 2;
+    let y = output_size.h - 120; // Floating above the dock
+    
+    let bg = SolidColorBuffer::new(
+        (pill_w, pill_h),
+        Color32F::new(bg_color.r, bg_color.g, bg_color.b, bg_color.a * 0.9),
+    );
+    elements.extend(bg.render_elements(renderer, (x, y).into(), scale, 1.0));
+    
+    let bar_w = pill_w - 80;
+    let fill_w = (bar_w as f32 * osd.value) as i32;
+    let accent = crate::theme::MitosTheme::effective_accent();
+    let bar_fill = SolidColorBuffer::new((fill_w, 8), Color32F::new(accent.r, accent.g, accent.b, accent.a));
+    elements.extend(bar_fill.render_elements(renderer, (x + 60, y + 20).into(), scale, 1.0));
+}
+
+
 
     // ------------------------------------------------------------
     // 5. MITOS OVERLAYS (Launcher, etc.)
     // ------------------------------------------------------------
     elements.extend(overlay_elements);
+
+    
 
     // ------------------------------------------------------------
     // 6. SECURE AUTHENTICATION OVERLAY
