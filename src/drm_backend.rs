@@ -90,8 +90,6 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
 
     // ============================================================
     // LIBSEAT SESSION
-    //
-    // ADJUST: smithay 0.7 LibSeatSession::new return shape.
     // ============================================================
     let (session, notify) = LibSeatSession::new()?;
 
@@ -217,7 +215,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     // ============================================================
     let gbm = GbmDevice::new(fd.clone())?;
 
-    let egl_display = EGLDisplay::new(gbm.clone())?; // ADJUST if 0.7 differs
+    let egl_display = EGLDisplay::new(gbm.clone())?;
     let egl_context = EGLContext::new(&egl_display, None)?;
     let renderer = unsafe { GlesRenderer::new(egl_context)? };
 
@@ -225,8 +223,6 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
 
     // ============================================================
     // DRM COMPOSITOR
-    //
-    // ADJUST: smithay 0.7 DrmCompositor::new argument list.
     // ============================================================
     let compositor = DrmCompositor::new(
         &output,
@@ -273,8 +269,6 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
 
     // ============================================================
     // LIBINPUT (real keyboard / mouse / touchpad)
-    //
-    // ADJUST: smithay 0.7 LibinputSession::new shape.
     // ============================================================
     let libinput_session = LibinputSession::new(session.clone());
     let input_backend = LibinputInputBackend::new(libinput_session);
@@ -324,6 +318,12 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     seat.add_pointer();
 
     // ============================================================
+    // D-BUS NOTIFICATION SERVICE
+    // ============================================================
+    let dbus_service = crate::dbus::DbusService::new()
+        .expect("Failed to start D-Bus notification service");
+
+    // ============================================================
     // MITOS STATE + SHELL
     // ============================================================
     let home_screen = crate::desktop::HomeScreenConfig::load();
@@ -335,8 +335,9 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         shm_state,
         seat_state,
         seat,
-        output.clone(),
+        vec![output.clone()], // Multi-monitor support
         home_screen,
+        dbus_service,
         None,
     );
 
@@ -345,6 +346,10 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|e| format!("MITOS GUI: {e}"))?;
 
     let mut shell_text = crate::renderer::ShellTextState::new();
+    
+    // NEW: Window shadow/border cache & Tray
+    let mut window_chrome = crate::renderer::WindowChrome::new();
+    let mut tray = crate::renderer::TrayState::new();
 
     // Glass panels + support buffers (same as Winit path).
     let mut top_bar_glass =
@@ -427,6 +432,23 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
             full_redraw_frames = full_redraw_frames.max(1);
         }
 
+        if tray.refresh(
+            &state.network,
+            &state.battery,
+            state.volume,
+            state.muted,
+        ) {
+            state.pending_full_redraw = true;
+        }
+
+        // Tick notifications (auto-dismiss expired ones)
+        if state.notifications.tick() {
+            state.pending_full_redraw = true;
+        }
+
+        // Poll D-Bus notifications
+        state.poll_dbus();
+
         // --------------------------------------------------------
         // RENDER + PAGE FLIP
         // --------------------------------------------------------
@@ -457,10 +479,12 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                     &dock_highlight,
                     &dock_border,
                     &shell_text,
+                    &tray,
                     scale,
                 );
 
             let output_size = size.into();
+            let top_bar_height = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
 
             let elements = match crate::renderer::collect_frame_elements(
                 renderer,
@@ -470,6 +494,17 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                 output_size,
                 shell_elements,
                 std::iter::empty(),
+                &mut window_chrome,
+                &state.popups,
+                &state.notifications.active,
+                top_bar_height,
+                &state.auth,
+                &state.auth,
+                &state.osd,
+                state.night_light,
+                state.current_workspace,
+                state.workspace_swipe_x,
+                output_size.w,
             ) {
                 Ok(e) => e,
                 Err(err) => {
@@ -477,6 +512,15 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
             };
+
+            // --------------------------------------------------------
+            // SCREENSHOT CAPTURE
+            // --------------------------------------------------------
+            if state.pending_screenshot {
+                state.pending_screenshot = false;
+                let physical_size = output_size.to_f64().to_physical(scale).to_i32_round();
+                let _ = crate::screenshot::take_screenshot(renderer, physical_size, &elements);
+            }
 
             // ADJUST: render_frame / queue_frame signatures.
             match compositor.render_frame(
