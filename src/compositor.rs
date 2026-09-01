@@ -223,6 +223,7 @@ impl CompositorHandler for MitosGuiState {
 
         self.popups.commit(surface);
     }
+}
 
 
 // ============================================================
