@@ -177,6 +177,13 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     return FilterResult::Intercept(());
                 }
 
+                // Example for Super + 2:
+               if mods.logo && keysym == keysyms::KEY_2.into() {
+               let active_monitor = state.active_output_name();
+               state.switch_workspace(&active_monitor, 1); // Workspace index 1
+              return FilterResult::Intercept(());
+                }
+
 
                 // Super + Down: Minimize
                 // Super + Shift + Down: Restore last minimized
