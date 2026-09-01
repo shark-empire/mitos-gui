@@ -18,7 +18,8 @@ smithay = { version = "0.7", features = [
     "renderer_gl",
 ] }
 
-nix = { version = "0.29", features = ["fs"] }
+nix = { version = "0.29", features = ["fs", "signal", "process"] }
+libc = "0.2"
 
 wayland-protocols = { version = "0.32", features = ["server"] }
 
