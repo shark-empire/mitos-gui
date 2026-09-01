@@ -224,7 +224,7 @@ impl MitosGuiState {
         shm_state: ShmState,
         seat_state: SeatState<Self>,
         seat: Seat<Self>,
-        output: Vec<Output>,
+        outputs: Vec<Output>,
         home_screen: HomeScreenConfig,
         dbus_service: crate::dbus::DbusService, // Added
         _unused: Option<()>,
