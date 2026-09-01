@@ -17,7 +17,6 @@ use smithay::backend::input::{
 
 use smithay::input::keyboard::{
     keysyms,
-    keysym_to_char,
     FilterResult,
 };
 
