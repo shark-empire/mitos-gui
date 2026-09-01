@@ -7,6 +7,9 @@
 //! - forward pointer events to the focused Wayland surface
 //! - Stage 4: window dragging (Super + left-drag)
 //! - Stage 4: window resizing (Super + right-drag)
+//! - Stage 7: Hot corners (Launcher & Night Light)
+
+use std::time::{Duration, Instant};
 
 use smithay::backend::input::{
     AbsolutePositionEvent,
@@ -29,6 +32,7 @@ use smithay::output::Output;
 use smithay::utils::{
     Logical,
     Point,
+    Size,
     SERIAL_COUNTER,
 };
 
@@ -62,6 +66,10 @@ pub fn handle_pointer_motion_absolute<B: InputBackend>(
     let y = position.y * size.h as f64;
 
     state.pointer_location = Point::<f64, Logical>::from((x, y));
+
+    // --- HOT CORNERS CHECK ---
+    let logical_size = Size::<i32, Logical>::new(size.w, size.h);
+    check_hot_corners(state, state.pointer_location, logical_size);
 
     // Interactive move/resize follows the pointer.
     if state.interactive.is_some() {
@@ -268,22 +276,31 @@ fn dock_icon_under_pointer(
     None
 }
 
-pub fn check_hot_corners(state: &mut MitosGuiState, pointer: smithay::utils::Point<f64, smithay::utils::Logical>, output_size: smithay::utils::Size<i32, smithay::utils::Logical>) {
+/// Check if the pointer is in a hot corner and trigger the associated action.
+pub fn check_hot_corners(
+    state: &mut MitosGuiState, 
+    pointer: Point<f64, Logical>, 
+    output_size: Size<i32, Logical>
+) {
+    // 500ms cooldown prevents rapid-fire toggling when the mouse rests in the corner
+    if state.hot_corners_last_triggered.elapsed() < Duration::from_millis(500) {
+        return;
+    }
+
     let (x, y) = (pointer.x, pointer.y);
     let (w, h) = (output_size.w as f64, output_size.h as f64);
-    let threshold = 5.0; // 5 logical pixels
+    let threshold = 5.0; // 5 logical pixels from the edge
 
     // Top-Left: Open Launcher
     if x < threshold && y < threshold && !state.shell.launcher_visible {
         state.shell.toggle_launcher();
         state.pending_full_redraw = true;
+        state.hot_corners_last_triggered = Instant::now();
     }
     
     // Top-Right: Toggle Night Light
     if x > w - threshold && y < threshold {
-        state.night_light = !state.night_light;
-        state.pending_full_redraw = true;
+        state.toggle_night_light();
+        state.hot_corners_last_triggered = Instant::now();
     }
 }
-
-
