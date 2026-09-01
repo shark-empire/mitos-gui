@@ -270,6 +270,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     theme::MitosTheme::apply_runtime(&home_screen);
 
     // ============================================================
+    // D-BUS NOTIFICATION SERVICE
+    // ============================================================
+
+    let dbus_service = dbus::DbusService::new()
+        .expect("Failed to start D-Bus notification service");
+
+    // ============================================================
     // MITOS STATE
     // ============================================================
 
@@ -279,8 +286,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         shm_state,
         seat_state,
         seat,
-        output.clone(),
+        vec![output.clone()], // Multi-monitor support
         home_screen,
+        dbus_service,
         None,
     );
 
@@ -567,12 +575,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.pending_full_redraw = true;
         }
 
-
-
-      // Tick notifications (auto-dismiss expired ones)
+        // Tick notifications (auto-dismiss expired ones)
         if state.notifications.tick() {
             state.pending_full_redraw = true;
         }
+
+        // Poll D-Bus notifications
+        state.poll_dbus();
 
         // ========================================================
         // FRAME SCHEDULING & DAMAGE TRACKING
@@ -751,7 +760,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             output_size.w,                // <--- ADD
                         )?;
 
-
+                        // ------------------------------------------------
+                        // SCREENSHOT CAPTURE
+                        // ------------------------------------------------
+                        if state.pending_screenshot {
+                            state.pending_screenshot = false;
+                            let physical_size = output_size.to_f64().to_physical(scale).to_i32_round();
+                            let _ = screenshot::take_screenshot(renderer, physical_size, &elements);
+                        }
 
                         // ------------------------------------------------
                         // DAMAGE TRACKER
