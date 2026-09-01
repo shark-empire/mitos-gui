@@ -4,7 +4,6 @@ use crate::desktop::HomeScreenConfig;
 use crate::renderer::GlassPanel;
 use crate::shell_interaction::AppEntry;
 use crate::wm::InteractiveAction;
-use std::time::Instant;
 
 use std::time::{Duration, Instant};
 use smithay::{
@@ -24,6 +23,44 @@ use smithay::{
         shm::ShmState,
     },
 };
+
+// ============================================================================
+// ON-SCREEN DISPLAY (OSD)
+// ============================================================================
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OsdIcon {
+    Volume,
+    Muted,
+    Brightness,
+}
+
+#[derive(Clone, Debug)]
+pub struct OsdState {
+    pub active: bool,
+    pub icon: OsdIcon,
+    pub value: f32, // 0.0 to 1.0
+    pub last_updated: Instant,
+}
+
+impl OsdState {
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            icon: OsdIcon::Volume,
+            value: 0.0,
+            // Hide immediately on startup by setting it to the past
+            last_updated: Instant::now() - Duration::from_secs(3),
+        }
+    }
+
+    pub fn trigger(&mut self, icon: OsdIcon, value: f32) {
+        self.active = true;
+        self.icon = icon;
+        self.value = value.clamp(0.0, 1.0);
+        self.last_updated = Instant::now();
+    }
+}
 
 // ============================================================================
 // MITOS SHELL
@@ -159,13 +196,15 @@ pub struct MitosGuiState {
     /// a full redraw and shader recompile after a live config reload.
     pub pending_full_redraw: bool,
 
-    pub osd: OsdState,
-    
-    pub night_light: bool,
-
     /// Stage 6: Secure authentication prompt.
     pub auth: crate::auth::AuthPrompt,
 
+    // ------------------------------------------------------------------------
+    // Stage 7: OSD, Night Light, Hot Corners
+    // ------------------------------------------------------------------------
+    pub osd: OsdState,
+    pub night_light: bool,
+    pub hot_corners_last_triggered: Instant,
 }
 
 impl MitosGuiState {
@@ -209,6 +248,8 @@ impl MitosGuiState {
         // Pre-populate launcher results so it's ready immediately when opened
         shell.launcher_results = launcher_apps.clone();
 
+        let initial_night_light = home_screen.night_light;
+
         // ------------------------------------------------------------
         // Global state
         // ------------------------------------------------------------
@@ -237,12 +278,22 @@ impl MitosGuiState {
             muted: false,
             last_status_poll: Instant::now(),
             drm_vblank: false,
-
-             auth: crate::auth::AuthPrompt::new(),
-            
+            auth: crate::auth::AuthPrompt::new(),
             launcher_apps,
             pending_full_redraw: false,
+
+            // Stage 7 Features
+            osd: OsdState::new(),
+            night_light: initial_night_light,
+            hot_corners_last_triggered: Instant::now() - Duration::from_secs(1),
         }
+    }
+
+    /// Toggle the Night Light (Eye Comfort) mode.
+    pub fn toggle_night_light(&mut self) {
+        self.night_light = !self.night_light;
+        self.pending_full_redraw = true;
+        println!("MITOS GUI: Night Light {}", if self.night_light { "enabled" } else { "disabled" });
     }
 
     /// Re-poll kernel status every 5 seconds.
@@ -269,7 +320,14 @@ impl MitosGuiState {
     pub fn reload_configuration(&mut self) {
         println!("MITOS GUI: home.conf changed, reloading configuration");
 
+        let old_config = self.home_screen.clone();
         self.home_screen = HomeScreenConfig::load();
+        
+        // Sync night light state if it was changed externally by mitos-settings
+        if self.home_screen.night_light != old_config.night_light {
+            self.night_light = self.home_screen.night_light;
+        }
+
         crate::theme::MitosTheme::apply_runtime(&self.home_screen);
 
         let output_size = self
@@ -317,28 +375,5 @@ impl SeatHandler for MitosGuiState {
         _image: CursorImageStatus,
     ) {
         // MITOS cursor rendering will be implemented later.
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum OsdIcon { Volume, Muted, Brightness }
-
-#[derive(Clone, Debug)]
-pub struct OsdState {
-    pub active: bool,
-    pub icon: OsdIcon,
-    pub value: f32, // 0.0 to 1.0
-    pub last_updated: Instant,
-}
-
-impl OsdState {
-    pub fn new() -> Self {
-        Self { active: false, icon: OsdIcon::Volume, value: 0.0, last_updated: Instant::now() }
-    }
-    pub fn trigger(&mut self, icon: OsdIcon, value: f32) {
-        self.active = true;
-        self.icon = icon;
-        self.value = value.clamp(0.0, 1.0);
-        self.last_updated = Instant::now();
     }
 }
