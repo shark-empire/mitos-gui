@@ -7,7 +7,6 @@
 //! - top-bar configuration
 //! - launcher configuration
 //! - dock configuration
-//! - logical shell layout
 //!
 //! Rendering remains in `renderer.rs`.
 //! This module deliberately does not contain GLES/OpenGL code.
@@ -22,7 +21,6 @@ use smithay::{
 
 use crate::renderer::GlassPanel;
 use crate::theme::{Color, MitosTheme};
-
 
 // ============================================================================
 // HOME SCREEN CONFIGURATION
@@ -69,6 +67,9 @@ pub struct HomeScreenConfig {
 
     /// Optional wallpaper path override.
     pub wallpaper_path: Option<String>,
+
+    /// Whether Night Light (blue light filter) is enabled.
+    pub night_light: bool,
 }
 
 impl Default for HomeScreenConfig {
@@ -92,6 +93,7 @@ impl Default for HomeScreenConfig {
             glass_opacity: None,
             panel_radius: None,
             wallpaper_path: None,
+            night_light: false,
         }
     }
 }
@@ -105,9 +107,7 @@ impl HomeScreenConfig {
         let mut config = Self::default();
 
         let Some(path) = config_path() else {
-            println!(
-                "MITOS GUI: no $HOME, using default home screen config"
-            );
+            println!("MITOS GUI: no $HOME, using default home screen config");
             return config;
         };
 
@@ -134,7 +134,6 @@ impl HomeScreenConfig {
                     path.display(),
                     line_no + 1,
                 );
-
                 continue;
             };
 
@@ -151,7 +150,6 @@ impl HomeScreenConfig {
                         config.background = color;
                         saw_background = true;
                     }
-
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: invalid color {value:?}, keeping default",
                         path.display(),
@@ -165,7 +163,6 @@ impl HomeScreenConfig {
 
                 "top_bar" => match parse_bool(value) {
                     Some(enabled) => config.top_bar = enabled,
-
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: expected `true` or `false`, got {value:?}, keeping default",
                         path.display(),
@@ -173,19 +170,14 @@ impl HomeScreenConfig {
                     ),
                 },
 
-                "top_bar_height" => {
-                    match parse_positive_f32(value) {
-                        Some(height) => {
-                            config.top_bar_height = height;
-                        }
-
-                        None => tracing::warn!(
-                            "MITOS GUI: {}:{}: invalid top bar height {value:?}, keeping default",
-                            path.display(),
-                            line_no + 1,
-                        ),
-                    }
-                }
+                "top_bar_height" => match parse_positive_f32(value) {
+                    Some(height) => config.top_bar_height = height,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: invalid top bar height {value:?}, keeping default",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
 
                 // --------------------------------------------------------
                 // Launcher
@@ -193,7 +185,6 @@ impl HomeScreenConfig {
 
                 "launcher" => match parse_bool(value) {
                     Some(enabled) => config.launcher = enabled,
-
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: expected `true` or `false`, got {value:?}, keeping default",
                         path.display(),
@@ -201,33 +192,23 @@ impl HomeScreenConfig {
                     ),
                 },
 
-                "launcher_width" => {
-                    match parse_positive_f32(value) {
-                        Some(width) => {
-                            config.launcher_width = width;
-                        }
+                "launcher_width" => match parse_positive_f32(value) {
+                    Some(width) => config.launcher_width = width,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: invalid launcher width {value:?}, keeping default",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
 
-                        None => tracing::warn!(
-                            "MITOS GUI: {}:{}: invalid launcher width {value:?}, keeping default",
-                            path.display(),
-                            line_no + 1,
-                        ),
-                    }
-                }
-
-                "launcher_height" => {
-                    match parse_positive_f32(value) {
-                        Some(height) => {
-                            config.launcher_height = height;
-                        }
-
-                        None => tracing::warn!(
-                            "MITOS GUI: {}:{}: invalid launcher height {value:?}, keeping default",
-                            path.display(),
-                            line_no + 1,
-                        ),
-                    }
-                }
+                "launcher_height" => match parse_positive_f32(value) {
+                    Some(height) => config.launcher_height = height,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: invalid launcher height {value:?}, keeping default",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
 
                 // --------------------------------------------------------
                 // Dock
@@ -235,7 +216,6 @@ impl HomeScreenConfig {
 
                 "dock" => match parse_bool(value) {
                     Some(enabled) => config.dock = enabled,
-
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: expected `true` or `false`, got {value:?}, keeping default",
                         path.display(),
@@ -243,19 +223,14 @@ impl HomeScreenConfig {
                     ),
                 },
 
-                "dock_height" => {
-                    match parse_positive_f32(value) {
-                        Some(height) => {
-                            config.dock_height = height;
-                        }
-
-                        None => tracing::warn!(
-                            "MITOS GUI: {}:{}: invalid dock height {value:?}, keeping default",
-                            path.display(),
-                            line_no + 1,
-                        ),
-                    }
-                }
+                "dock_height" => match parse_positive_f32(value) {
+                    Some(height) => config.dock_height = height,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: invalid dock height {value:?}, keeping default",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
 
                 // --------------------------------------------------------
                 // Shared MITOS Config (Theme & Live Reload)
@@ -307,6 +282,15 @@ impl HomeScreenConfig {
                         config.wallpaper_path = Some(value.to_string());
                     }
                 }
+
+                "night_light" => match parse_bool(value) {
+                    Some(enabled) => config.night_light = enabled,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false` for night_light, got {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
 
                 // --------------------------------------------------------
                 // Unknown
@@ -370,21 +354,13 @@ impl ShellLayout {
         // ------------------------------------------------------------
 
         let top_bar = if config.top_bar {
-            let top_bar_height = config
-                .top_bar_height
-                .max(1.0)
-                .round() as i32;
+            let top_bar_height = config.top_bar_height.max(1.0).round() as i32;
 
-            Some(GlassPanel::top_bar(
-                width,
-                top_bar_height,
-            ))
+            Some(GlassPanel::top_bar(width, top_bar_height))
         } else {
             None
         };
 
-
-        
         // ------------------------------------------------------------
         // Launcher
         //
@@ -405,7 +381,6 @@ impl ShellLayout {
                 .round() as i32;
 
             let x = ((width - launcher_width) / 2).max(0);
-
             let y = ((height - launcher_height) / 2).max(0);
 
             Some(GlassPanel {
@@ -424,47 +399,44 @@ impl ShellLayout {
             None
         };
 
-       
-// ------------------------------------------------------------
-// Dock
-//
-// Floating glass dock centered horizontally near the bottom.
-// ------------------------------------------------------------
+        // ------------------------------------------------------------
+        // Dock
+        //
+        // Floating glass dock centered horizontally near the bottom.
+        // ------------------------------------------------------------
 
-let dock = if config.dock {
-    let dock_height = config
-        .dock_height
-        .max(64.0)
-        .min(height as f32)
-        .round() as i32;
+        let dock = if config.dock {
+            let dock_height = config
+                .dock_height
+                .max(64.0)
+                .min(height as f32)
+                .round() as i32;
 
-    let dock_width = ((width as f32) * 0.55)
-        .max(360.0)
-        .min(width as f32 - 32.0)
-        .max(1.0)
-        .round() as i32;
+            let dock_width = ((width as f32) * 0.55)
+                .max(360.0)
+                .min(width as f32 - 32.0)
+                .round() as i32;
 
-    let bottom_margin = 20;
+            let bottom_margin = 20;
 
-    let x = ((width - dock_width) / 2).max(0);
+            let x = ((width - dock_width) / 2).max(0);
+            let y = (height - dock_height - bottom_margin).max(0);
 
-    let y = (height - dock_height - bottom_margin).max(0);
-
-    Some(GlassPanel {
-        position: (x, y),
-        size: (dock_width, dock_height),
-        radius: MitosTheme::effective_panel_radius(),
-        tint: crate::renderer::glass_color(),
-        border: Color32F::new(
-            MitosTheme::BORDER.r,
-            MitosTheme::BORDER.g,
-            MitosTheme::BORDER.b,
-            MitosTheme::BORDER.a,
-        ),
-    })
-} else {
-    None
-};
+            Some(GlassPanel {
+                position: (x, y),
+                size: (dock_width, dock_height),
+                radius: MitosTheme::effective_panel_radius(),
+                tint: crate::renderer::glass_color(),
+                border: Color32F::new(
+                    MitosTheme::BORDER.r,
+                    MitosTheme::BORDER.g,
+                    MitosTheme::BORDER.b,
+                    MitosTheme::BORDER.a,
+                ),
+            })
+        } else {
+            None
+        };
 
         Self {
             top_bar,
@@ -474,8 +446,7 @@ let dock = if config.dock {
     }
 }
 
-
- // ============================================================================
+// ============================================================================
 // DOCK
 // ============================================================================
 
@@ -554,7 +525,6 @@ impl Default for DockLayout {
     }
 }
 
-
 // ============================================================================
 // CONFIGURATION PATH
 // ============================================================================
@@ -622,20 +592,17 @@ fn parse_hex_color(value: &str) -> Option<Color> {
 
     let expand = |byte: u8| -> Option<u8> {
         let digit = (byte as char).to_digit(16)? as u8;
-
         Some(digit * 16 + digit)
     };
 
-    let channel =
-        |value: &str| -> Option<u8> {
-            u8::from_str_radix(value, 16).ok()
-        };
+    let channel = |value: &str| -> Option<u8> {
+        u8::from_str_radix(value, 16).ok()
+    };
 
     let (r, g, b, a) = match hex.len() {
         // #RGB
         3 => {
             let bytes = hex.as_bytes();
-
             (
                 expand(bytes[0])?,
                 expand(bytes[1])?,
