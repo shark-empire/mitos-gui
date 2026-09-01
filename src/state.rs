@@ -4,6 +4,7 @@ use crate::desktop::HomeScreenConfig;
 use crate::renderer::GlassPanel;
 use crate::shell_interaction::AppEntry;
 use crate::wm::InteractiveAction;
+use std::time::Instant;
 
 use std::time::{Duration, Instant};
 use smithay::{
@@ -157,6 +158,10 @@ pub struct MitosGuiState {
     /// Set by the config watcher; consumed by the main loop to force
     /// a full redraw and shader recompile after a live config reload.
     pub pending_full_redraw: bool,
+
+    pub osd: OsdState,
+    
+    pub night_light: bool,
 
     /// Stage 6: Secure authentication prompt.
     pub auth: crate::auth::AuthPrompt,
@@ -312,5 +317,28 @@ impl SeatHandler for MitosGuiState {
         _image: CursorImageStatus,
     ) {
         // MITOS cursor rendering will be implemented later.
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum OsdIcon { Volume, Muted, Brightness }
+
+#[derive(Clone, Debug)]
+pub struct OsdState {
+    pub active: bool,
+    pub icon: OsdIcon,
+    pub value: f32, // 0.0 to 1.0
+    pub last_updated: Instant,
+}
+
+impl OsdState {
+    pub fn new() -> Self {
+        Self { active: false, icon: OsdIcon::Volume, value: 0.0, last_updated: Instant::now() }
+    }
+    pub fn trigger(&mut self, icon: OsdIcon, value: f32) {
+        self.active = true;
+        self.icon = icon;
+        self.value = value.clamp(0.0, 1.0);
+        self.last_updated = Instant::now();
     }
 }
