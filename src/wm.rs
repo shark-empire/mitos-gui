@@ -64,7 +64,7 @@ pub struct WindowMeta {
     pub saved: Option<Rectangle<i32, Logical>>,
     pub maximized: bool,
     pub fullscreen: bool,
-    pub workspace: usize,
+    pub workspace: HashMap<Output, usize>,
 }
 
 impl Default for WindowMeta {
