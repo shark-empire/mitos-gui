@@ -30,7 +30,7 @@ ab_glyph = "0.2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 notify = "6"
 zbus = "4"
-dbus-crossroads = "0.5"
+
 dirs = "5"
 chrono = "0.4"
 
