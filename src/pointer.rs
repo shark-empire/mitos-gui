@@ -267,3 +267,23 @@ fn dock_icon_under_pointer(
 
     None
 }
+
+pub fn check_hot_corners(state: &mut MitosGuiState, pointer: smithay::utils::Point<f64, smithay::utils::Logical>, output_size: smithay::utils::Size<i32, smithay::utils::Logical>) {
+    let (x, y) = (pointer.x, pointer.y);
+    let (w, h) = (output_size.w as f64, output_size.h as f64);
+    let threshold = 5.0; // 5 logical pixels
+
+    // Top-Left: Open Launcher
+    if x < threshold && y < threshold && !state.shell.launcher_visible {
+        state.shell.toggle_launcher();
+        state.pending_full_redraw = true;
+    }
+    
+    // Top-Right: Toggle Night Light
+    if x > w - threshold && y < threshold {
+        state.night_light = !state.night_light;
+        state.pending_full_redraw = true;
+    }
+}
+
+
