@@ -20,6 +20,8 @@ mod icons;
 mod auth;
 mod session;
 mod gestures;
+mod screenshot;
+mod dbus;
 
 use std::sync::Arc;
 use std::time::Duration;
