@@ -94,6 +94,23 @@ pub fn handle_keyboard_key<B: InputBackend>(
                         return FilterResult::Intercept(());
                     }
 
+                // Inside the hardware media keys block:
+keysyms::KEY_XF86AudioRaiseVolume => {
+    state.muted = false;
+    state.volume = state.volume.saturating_add(5).min(100);
+    state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
+    state.pending_full_redraw = true;
+    return FilterResult::Intercept(());
+}
+keysyms::KEY_XF86AudioMute => {
+    state.muted = !state.muted;
+    let icon = if state.muted { crate::state::OsdIcon::Muted } else { crate::state::OsdIcon::Volume };
+    state.osd.trigger(icon, if state.muted { 0.0 } else { state.volume as f32 / 100.0 });
+    state.pending_full_redraw = true;
+    return FilterResult::Intercept(());
+}
+
+
                     _ => {}
                 }
             }
