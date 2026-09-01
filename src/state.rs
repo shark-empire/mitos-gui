@@ -158,7 +158,9 @@ pub struct MitosGuiState {
     // ------------------------------------------------------------------------
     // Output
     // ------------------------------------------------------------------------
-    pub output: Output,
+
+     pub outputs: Vec<Output>,
+
 
     // ------------------------------------------------------------------------
     // Desktop
@@ -205,6 +207,10 @@ pub struct MitosGuiState {
     pub osd: OsdState,
     pub night_light: bool,
     pub hot_corners_last_triggered: Instant,
+
+    pub pending_screenshot: bool,
+    pub dbus_service: Option<crate::dbus::DbusService>,
+
 }
 
 impl MitosGuiState {
@@ -215,15 +221,23 @@ impl MitosGuiState {
         shm_state: ShmState,
         seat_state: SeatState<Self>,
         seat: Seat<Self>,
-        output: Output,
+        output: Vec<Output>,
         home_screen: HomeScreenConfig,
+        dbus_service: crate::dbus::DbusService, // Added
         _unused: Option<()>,
     ) -> Self {
         // ------------------------------------------------------------
         // Desktop space
         // ------------------------------------------------------------
         let mut space = Space::default();
-        space.map_output(&output, (0, 0));
+        let mut offset_x = 0;
+        for o in &outputs {
+            space.map_output(o, (offset_x, 0));
+            if let Some(mode) = o.current_mode() {
+                offset_x += mode.size.w;
+            }
+        }
+
 
         let mut shell = MitosShell::new();
         let output_size = output
@@ -286,6 +300,9 @@ impl MitosGuiState {
             osd: OsdState::new(),
             night_light: initial_night_light,
             hot_corners_last_triggered: Instant::now() - Duration::from_secs(1),
+
+            pending_screenshot: false,
+            dbus_service: Some(dbus_service),
         }
     }
 
@@ -346,6 +363,27 @@ impl MitosGuiState {
         self.shell.update_layout(&self.home_screen, output_size);
         self.pending_full_redraw = true;
     }
+
+     pub fn add_output(&mut self, output: Output) {
+        let mut offset_x = 0;
+        for o in &self.outputs {
+            if let Some(mode) = o.current_mode() {
+                offset_x += mode.size.w;
+            }
+        }
+        self.space.map_output(&output, (offset_x, 0));
+        self.outputs.push(output);
+    }
+
+    pub fn poll_dbus(&mut self) {
+        if let Some(service) = self.dbus_service.as_ref() {
+            while let Ok((app_name, title, body)) = service.rx.try_recv() {
+                self.notifications.push(&app_name, &title, &body);
+                self.pending_full_redraw = true;
+            }
+        }
+    }
+
 }
 
 // ============================================================================
