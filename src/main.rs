@@ -739,6 +739,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         let top_bar_height = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
 
+
+                        // 1. Get the name of the monitor we are currently rendering for
+                         let output_name = output.name();
+
+                       // 2. Look up the active workspace for THIS monitor (fallback to 0)
+                       let current_ws = state.current_workspace.get(&output_name).copied().unwrap_or(0);
+                        
                         let elements = renderer::collect_frame_elements(
                             renderer,
                             &state.space,
@@ -755,6 +762,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &state.auth,
                             &state.osd,             // <-- ADDED
                             state.night_light,      // <-- ADDED
+                            current_ws,               // <--- PASS THE USIZE HERE
                             state.current_workspace,      // <--- ADD
                             state.workspace_swipe_x,      // <--- ADD
                             output_size.w,                // <--- ADD
