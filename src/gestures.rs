@@ -2,13 +2,16 @@
 //! Handles 1:1 workspace swiping.
 
 use smithay::backend::input::{
-    InputBackend, SwipeGestureBeginEvent, SwipeGestureUpdateEvent, SwipeGestureEndEvent,
+    InputBackend, 
+    GestureBeginEvent,  // <-- CHANGED from SwipeGestureBeginEvent
+    GestureUpdateEvent, // <-- CHANGED
+    GestureEndEvent,    // <-- CHANGED
 };
 use crate::state::MitosGuiState;
 
 pub fn handle_swipe_begin<B: InputBackend>(
     state: &mut MitosGuiState,
-    event: B::SwipeGestureBeginEvent,
+     event: B::GestureBeginEvent, 
 ) {
     // Only trigger on 3 or 4 finger horizontal swipes
     if event.fingers() >= 3 {
@@ -18,7 +21,7 @@ pub fn handle_swipe_begin<B: InputBackend>(
 
 pub fn handle_swipe_update<B: InputBackend>(
     state: &mut MitosGuiState,
-    event: B::SwipeGestureUpdateEvent,
+    event: B::GestureUpdateEvent, 
 ) {
     if event.fingers() >= 3 {
         // event.delta_x() is usually in pixels. We normalize it to screen width.
@@ -39,7 +42,7 @@ pub fn handle_swipe_update<B: InputBackend>(
 
 pub fn handle_swipe_end<B: InputBackend>(
     state: &mut MitosGuiState,
-    _event: B::SwipeGestureEndEvent,
+    event: B::GestureEndEvent, 
 ) {
     // Snap to the nearest workspace based on swipe distance
     let threshold = 0.2; // 20% of the screen width
