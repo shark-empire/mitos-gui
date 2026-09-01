@@ -170,6 +170,14 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     return FilterResult::Intercept(());
                 }
 
+                 // Super + PrintScreen: Screenshot
+                if keysym == keysyms::KEY_Print.into() || keysym == keysyms::KEY_Sys_Req.into() {
+                    state.pending_screenshot = true;
+                    state.pending_full_redraw = true;
+                    return FilterResult::Intercept(());
+                }
+
+
                 // Super + Down: Minimize
                 // Super + Shift + Down: Restore last minimized
                 if keysym == keysyms::KEY_Down.into() {
