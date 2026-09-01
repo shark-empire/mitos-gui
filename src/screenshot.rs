@@ -2,7 +2,7 @@
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen, Renderer};
-use smithay::backend::renderer::damage::{OutputDamageTracker, render_output};
+use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::utils::{Physical, Rectangle, Size, Transform};
 use image::RgbaImage;
 
@@ -18,6 +18,7 @@ where
     let mut texture = renderer.create_buffer(Fourcc::Abgr8888, output_size)?;
     let mut target = renderer.bind(&mut texture)?;
     let mut tracker = OutputDamageTracker::new(output_size, 1.0, Transform::Normal);
+    tracker.render_output(renderer, &mut target, 0, [0.0, 0.0, 0.0, 1.0].into(), elements)?; 
     
     // 2. Render elements to the offscreen target (force full damage)
     let _ = render_output(
