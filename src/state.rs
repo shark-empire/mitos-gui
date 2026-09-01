@@ -5,6 +5,7 @@ use crate::renderer::GlassPanel;
 use crate::shell_interaction::AppEntry;
 use crate::wm::InteractiveAction;
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use smithay::{
     desktop::{PopupManager, Space, Window},
@@ -150,6 +151,8 @@ pub struct MitosGuiState {
     pub seat_state: SeatState<Self>,
     pub seat: Seat<Self>,
 
+    pub current_workspace: HashMap<String, usize>,
+    
     // ------------------------------------------------------------------------
     // MITOS shell
     // ------------------------------------------------------------------------
@@ -238,6 +241,11 @@ impl MitosGuiState {
             }
         }
 
+     // Initialize the HashMap
+        let mut current_workspace = HashMap::new();
+        for o in &outputs {
+            current_workspace.insert(o.name(), 0);
+        }
 
         let mut shell = MitosShell::new();
         let output_size = output
@@ -374,12 +382,18 @@ pub fn add_output(&mut self, output: Output) {
         }
     }
     self.space.map_output(&output, (offset_x, 0));
+            
+    // Start new monitors on workspace 0
+     self.current_workspace.entry(output.name()).or_insert(0);
     self.outputs.push(output);
 }
 
 pub fn remove_output(&mut self, output: &Output) {
     self.space.unmap_output(output);
     self.outputs.retain(|o| o != output);
+
+     // Clean up workspace tracking for the removed monitor
+    self.current_workspace.remove(&output.name());
     
     // If we removed the primary output, try to focus a window on the remaining one
     if self.outputs.is_empty() {
