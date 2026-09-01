@@ -1554,7 +1554,13 @@ if osd.active && osd.last_updated.elapsed().as_secs() < 2 {
     let bar_fill = SolidColorBuffer::new((fill_w, 8), Color32F::new(accent.r, accent.g, accent.b, accent.a));
     elements.extend(bar_fill.render_elements(renderer, (x + 60, y + 20).into(), scale, 1.0));
 }
-
+ // --- NIGHT LIGHT (EYE COMFORT) ---
+if night_light {
+    // A subtle warm orange tint with low alpha
+    let night_tint = Color32F::new(1.0, 0.7, 0.4, 0.12); 
+    let tint_buf = SolidColorBuffer::new(output_size, night_tint);
+    elements.extend(tint_buf.render_elements(renderer, (0, 0).into(), scale, 1.0));
+}
 
 
     // ------------------------------------------------------------
