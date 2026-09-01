@@ -364,16 +364,35 @@ impl MitosGuiState {
         self.pending_full_redraw = true;
     }
 
-     pub fn add_output(&mut self, output: Output) {
-        let mut offset_x = 0;
-        for o in &self.outputs {
-            if let Some(mode) = o.current_mode() {
-                offset_x += mode.size.w;
-            }
+// In impl MitosGuiState
+
+pub fn add_output(&mut self, output: Output) {
+    let mut offset_x = 0;
+    for o in &self.outputs {
+        if let Some(mode) = o.current_mode() {
+            offset_x += mode.size.w;
         }
-        self.space.map_output(&output, (offset_x, 0));
-        self.outputs.push(output);
     }
+    self.space.map_output(&output, (offset_x, 0));
+    self.outputs.push(output);
+}
+
+pub fn remove_output(&mut self, output: &Output) {
+    self.space.unmap_output(output);
+    self.outputs.retain(|o| o != output);
+    
+    // If we removed the primary output, try to focus a window on the remaining one
+    if self.outputs.is_empty() {
+        self.focused_window = None;
+    } else if let Some(focused) = &self.focused_window {
+        // Check if focused window is still on a valid output
+        let still_valid = self.space.outputs_for_element(focused).any(|o| o == output);
+        if !still_valid {
+            self.focused_window = None;
+        }
+    }
+}
+
 
     pub fn poll_dbus(&mut self) {
         if let Some(service) = self.dbus_service.as_ref() {
