@@ -739,12 +739,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         let top_bar_height = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
 
-
                         // 1. Get the name of the monitor we are currently rendering for
-                         let output_name = output.name();
+                        let output_name = output.name();
 
-                       // 2. Look up the active workspace for THIS monitor (fallback to 0)
-                       let current_ws = state.current_workspace.get(&output_name).copied().unwrap_or(0);
+                        // 2. Look up the active workspace for THIS monitor (fallback to 0)
+                        let current_ws = state.current_workspace.get(&output_name).copied().unwrap_or(0);
                         
                         let elements = renderer::collect_frame_elements(
                             renderer,
@@ -754,18 +753,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             output_size,
                             shell_elements,
                             std::iter::empty(),
-                            &mut window_chrome,      // (From previous step)
-                            &state.popups,           // (From previous step)
-                            &state.notifications.active, // <--- ADD THIS
-                            top_bar_height,        // <--- ADD THIS
+                            &mut window_chrome,
+                            &state.popups,
+                            &state.notifications.active,
+                            top_bar_height,
                             &state.auth,
                             &state.auth,
-                            &state.osd,             // <-- ADDED
-                            state.night_light,      // <-- ADDED
-                            current_ws,               // <--- PASS THE USIZE HERE
-                            state.current_workspace,      // <--- ADD
-                            state.workspace_swipe_x,      // <--- ADD
-                            output_size.w,                // <--- ADD
+                            &state.osd,
+                            state.night_light,
+                            current_ws, // Pass the usize here
+                            state.workspace_swipe_x,
+                            output_size.w,
                         )?;
 
                         // ------------------------------------------------
@@ -776,65 +774,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let physical_size = output_size.to_f64().to_physical(scale).to_i32_round();
                             let _ = screenshot::take_screenshot(renderer, physical_size, &elements);
                         }
-
-
- // 1. Collect the "background" elements (Wallpaper + Windows, but NO glass panels yet)
-let background_elements = renderer::collect_background_elements(
-    renderer, &state.space, scale, &wallpaper, output_size, 
-    &mut window_chrome, &state.popups, state.current_workspace
-);
-
-// 2. Capture the background into an offscreen texture
-let bg_texture = renderer::capture_background(renderer, physical_size, &background_elements)
-    .expect("Failed to capture background");
-
-// 3. Compile the frosted glass shader (do this once at startup ideally, but here for simplicity)
-let frosted_program = renderer::frosted_glass::compile_frosted_program(renderer)
-    .expect("Failed to compile frosted glass shader");
-
-// 4. Create FrostedGlassElements for the Top Bar and Dock
-let mut frosted_elements: Vec<Box<dyn Element<GlesRenderer>>> = Vec::new();
-
-if let Some(panel) = state.shell.top_bar {
-    let geom = Rectangle::new(
-        (0, 0).into(), 
-        (panel.size.0, panel.size.1).to_physical(scale).to_i32_round()
-    );
-    frosted_elements.push(Box::new(renderer::frosted_glass::FrostedGlassElement {
-        geometry: geom,
-        bg_texture: bg_texture.clone(),
-        program: frosted_program.clone(),
-        tint: [0.1, 0.1, 0.1, 0.7], // Dark tint with 70% opacity
-        border: [1.0, 1.0, 1.0, 0.2],
-    }));
-}
-
-if let Some(panel) = state.shell.dock {
-    // Calculate dock geometry based on your layout logic
-    let geom = Rectangle::new(
-        (100, 800).into(), // Example coordinates
-        (panel.size.0, panel.size.1).to_physical(scale).to_i32_round()
-    );
-    frosted_elements.push(Box::new(renderer::frosted_glass::FrostedGlassElement {
-        geometry: geom,
-        bg_texture: bg_texture.clone(),
-        program: frosted_program.clone(),
-        tint: [0.2, 0.2, 0.2, 0.6],
-        border: [1.0, 1.0, 1.0, 0.3],
-    }));
-}
-
-// 5. Now collect the FULL frame elements (Background + Windows + Frosted Glass + Text)
-let elements = renderer::collect_frame_elements(
-    renderer, &state.space, scale, &wallpaper, output_size, 
-    shell_elements, // Your existing shell text/icons
-    frosted_elements.into_iter(), // <--- ADD THE FROSTED GLASS HERE
-    &mut window_chrome, &state.popups, &state.notifications.active, 
-    top_bar_height, &state.auth, &state.auth, &state.osd, state.night_light,
-    state.current_workspace, state.workspace_swipe_x, output_size.w,
-)?;
-
-
 
                         // ------------------------------------------------
                         // DAMAGE TRACKER
