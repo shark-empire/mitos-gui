@@ -25,7 +25,7 @@ use crate::state::MitosGuiState;
 // ============================================================================
 
 /// Per-window WM metadata stored in the window's user data.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct WindowMeta {
     /// Geometry saved while maximized / fullscreen / snapped.
     pub saved: Option<Rectangle<i32, Logical>>,
