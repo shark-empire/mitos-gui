@@ -417,6 +417,27 @@ pub fn remove_output(&mut self, output: &Output) {
         }
     }
 
+        /// Switches the workspace on a specific monitor
+    pub fn switch_workspace(&mut self, output_name: &str, ws: usize) {
+        self.current_workspace.insert(output_name.to_string(), ws);
+        self.pending_full_redraw = true;
+    }
+
+    /// Finds which monitor the pointer is currently hovering over
+    pub fn active_output_name(&self) -> String {
+        for output in &self.outputs {
+            if let Some(geom) = self.space.output_geometry(output) {
+                let ptr = self.pointer_location;
+                if ptr.x >= geom.loc.x as f64 && ptr.x < (geom.loc.x + geom.size.w) as f64 &&
+                   ptr.y >= geom.loc.y as f64 && ptr.y < (geom.loc.y + geom.size.h) as f64 {
+                    return output.name();
+                }
+            }
+        }
+        self.outputs.first().map(|o| o.name()).unwrap_or_default()
+    }
+
+
 }
 
 // ============================================================================
