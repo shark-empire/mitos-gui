@@ -204,12 +204,10 @@ impl CompositorHandler for MitosGuiState {
         &mut self.compositor_state
     }
 
-    fn client_compositor_state<'a>(&'a self, client: &'a Client) -> &'a CompositorClientState {
-        &client
-            .get_data::<MitosClientState>()
-            .expect("MITOS GUI: missing client state")
-            .compositor_state
+    fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        &client.get_data::<MitosClientState>().unwrap().compositor_state
     }
+
 
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
