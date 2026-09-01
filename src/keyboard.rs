@@ -1,9 +1,11 @@
 //! Keyboard input.
 //!
-//! Stage 4 & 5 keyboard handling:
+//! Stage 4, 5 & 7 keyboard handling:
 //! - Launcher search navigation (when open)
 //! - Super + Space toggles the MITOS launcher
 //! - Stage 4 window manager shortcuts (close, maximize, snap, etc.)
+//! - Stage 7 OSD (On-Screen Display) for media keys
+//! - Stage 7 Night Light toggle
 //! - Forward normal keys to the focused Wayland client
 
 use smithay::backend::input::{
@@ -46,27 +48,22 @@ pub fn handle_keyboard_key<B: InputBackend>(
         |state, mods, sym| {
             let keysym = sym.modified_sym();
 
-             // --------------------------------------------------------
+            // --------------------------------------------------------
             // SECURE AUTHENTICATION PROMPT (Highest Priority)
             // --------------------------------------------------------
             if state.auth.active {
                 return handle_auth_input(state, keysym, key_state);
             }
 
-
             // --------------------------------------------------------
-            // Stage 6: hardware media keys
+            // Stage 6 & 7: hardware media keys & OSD
             // --------------------------------------------------------
             if key_state == KeyState::Pressed {
                 match keysym {
                     keysyms::KEY_XF86AudioRaiseVolume => {
                         state.muted = false;
                         state.volume = state.volume.saturating_add(5).min(100);
-                        state.notifications.push(
-                            "MITOS Audio",
-                            &format!("Volume: {}%", state.volume),
-                            "Applied by the audio service in Stage 8.",
-                        );
+                        state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
                         state.pending_full_redraw = true;
                         return FilterResult::Intercept(());
                     }
@@ -74,47 +71,22 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     keysyms::KEY_XF86AudioLowerVolume => {
                         state.muted = false;
                         state.volume = state.volume.saturating_sub(5);
-                        state.notifications.push(
-                            "MITOS Audio",
-                            &format!("Volume: {}%", state.volume),
-                            "Applied by the audio service in Stage 8.",
-                        );
+                        state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
                         state.pending_full_redraw = true;
                         return FilterResult::Intercept(());
                     }
 
                     keysyms::KEY_XF86AudioMute => {
                         state.muted = !state.muted;
-                        state.notifications.push(
-                            "MITOS Audio",
-                            if state.muted { "Muted" } else { "Unmuted" },
-                            "",
-                        );
+                        let icon = if state.muted { crate::state::OsdIcon::Muted } else { crate::state::OsdIcon::Volume };
+                        state.osd.trigger(icon, if state.muted { 0.0 } else { state.volume as f32 / 100.0 });
                         state.pending_full_redraw = true;
                         return FilterResult::Intercept(());
                     }
 
-                // Inside the hardware media keys block:
-keysyms::KEY_XF86AudioRaiseVolume => {
-    state.muted = false;
-    state.volume = state.volume.saturating_add(5).min(100);
-    state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
-    state.pending_full_redraw = true;
-    return FilterResult::Intercept(());
-}
-keysyms::KEY_XF86AudioMute => {
-    state.muted = !state.muted;
-    let icon = if state.muted { crate::state::OsdIcon::Muted } else { crate::state::OsdIcon::Volume };
-    state.osd.trigger(icon, if state.muted { 0.0 } else { state.volume as f32 / 100.0 });
-    state.pending_full_redraw = true;
-    return FilterResult::Intercept(());
-}
-
-
                     _ => {}
                 }
             }
-
 
             // --------------------------------------------------------
             // LAUNCHER SEARCH NAVIGATION
@@ -143,23 +115,27 @@ keysyms::KEY_XF86AudioMute => {
                 );
 
                 return FilterResult::Intercept(());
-
-
             }
 
             // --------------------------------------------------------
-            // Stage 4 Window Manager shortcuts
+            // Stage 4 & 7 Window Manager & Desktop shortcuts
             // --------------------------------------------------------
             if mods.logo {
 
-             // Super + N: Push a test notification (Stage 6)
-                if keysym == keysyms::KEY_n.into() {
+                // Super + N: Push a test notification (Stage 6)
+                if !mods.shift && keysym == keysyms::KEY_n.into() {
                     state.notifications.push(
                         "MITOS System",
                         "Notification Engine Active",
                         "Stage 6 desktop services are online.",
                     );
                     state.pending_full_redraw = true;
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Shift + N: Toggle Night Light (Stage 7)
+                if mods.shift && keysym == keysyms::KEY_n.into() {
+                    state.toggle_night_light();
                     return FilterResult::Intercept(());
                 }
 
@@ -175,6 +151,7 @@ keysyms::KEY_XF86AudioMute => {
                     crate::session::reboot();
                     return FilterResult::Intercept(());
                 }
+
                 // Super + Q: Close focused window
                 if keysym == keysyms::KEY_q.into() {
                     crate::wm::close_focused(state);
@@ -245,7 +222,6 @@ keysyms::KEY_XF86AudioMute => {
                         }
                     }
                 }
-
             }
 
             // --------------------------------------------------------
@@ -363,4 +339,3 @@ fn handle_auth_input(
     state.pending_full_redraw = true;
     FilterResult::Intercept(())
 }
-
