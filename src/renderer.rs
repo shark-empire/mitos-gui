@@ -27,6 +27,7 @@ use smithay::{
                 solid::{SolidColorBuffer, SolidColorRenderElement},
                 surface::WaylandSurfaceRenderElement,
                 AsRenderElements,
+                Kind,
             },
             gles::{
                 element::PixelShaderElement,
@@ -37,9 +38,8 @@ use smithay::{
         },
     },
     desktop::{Space, Window},
-    utils::{Logical, Rectangle, Scale, Size, Transform},
+    utils::{Logical, Point, Rectangle, Scale, Size, Transform},
 };
-
 
 use crate::desktop::HomeScreenConfig;
 use crate::theme::MitosTheme;
@@ -179,7 +179,6 @@ impl DesktopBackground {
         }
     }
 }
-
 
 // ============================================================================
 // MITOS WALLPAPER
@@ -344,7 +343,7 @@ impl Wallpaper {
             Some(1.0),
             Some(src),
             Some(output_size),
-            smithay::backend::renderer::element::Kind::Unspecified,
+            Kind::Unspecified,
         )
     }
 }
@@ -562,7 +561,7 @@ void main() {{
         None,
         1.0,
         Vec::new(),
-        smithay::backend::renderer::element::Kind::Unspecified,
+        Kind::Unspecified,
     ))
 }
 
@@ -732,8 +731,6 @@ pub fn collect_dock_elements(
 
     elements
 }
-
-
 
 fn collect_dock_icon_elements(
     panel: &GlassPanel,
@@ -1013,8 +1010,6 @@ impl TrayState {
     }
 }
 
-
-
 // ============================================================================
 // COMPLETE MITOS SHELL
 // ============================================================================
@@ -1046,9 +1041,8 @@ pub fn collect_shell_elements(
 
     text: &ShellTextState,
     tray: &TrayState,
-
-    state.current_workspace,
-    state.workspace_count,
+    current_workspace: usize,
+    workspace_count: usize,
 
     scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
@@ -1098,12 +1092,12 @@ pub fn collect_shell_elements(
                 // Workspace Dots (Centered in top bar)
         let dot_size = 6;
         let dot_spacing = 12;
-        let total_dots_w = (state.workspace_count as i32 * dot_size) + ((state.workspace_count as i32 - 1) * dot_spacing);
+        let total_dots_w = (workspace_count as i32 * dot_size) + ((workspace_count as i32 - 1) * dot_spacing);
         let mut dot_x = panel.position.0 + (panel.size.0 / 2) - (total_dots_w / 2);
         let dot_y = panel.position.1 + (panel.size.1 / 2) - (dot_size / 2);
 
-        for i in 0..state.workspace_count {
-            let color = if i == state.current_workspace {
+        for i in 0..workspace_count {
+            let color = if i == current_workspace {
                 crate::theme::MitosTheme::effective_accent()
             } else {
                 Color32F::new(1.0, 1.0, 1.0, 0.3)
@@ -1112,8 +1106,6 @@ pub fn collect_shell_elements(
             elements.extend(dot.render_elements(renderer, (dot_x, dot_y).into(), scale, 1.0));
             dot_x += dot_size + dot_spacing;
         }
-
-
     }
 
     // ------------------------------------------------------------
@@ -1343,8 +1335,6 @@ pub fn collect_notification_elements(
     let mut current_y = top_bar_height + margin;
 
     for notif in notifications {
-        // 1. Glass Background (using a translucent solid color for simplicity, 
-        // or you can pass a PixelShaderElement if you want the full liquid glass)
         let bg_color = crate::theme::MitosTheme::effective_glass();
         let bg = SolidColorBuffer::new(
             (panel_w, panel_h),
@@ -1358,7 +1348,6 @@ pub fn collect_notification_elements(
             1.0,
         ));
 
-        // 2. Border
         let border_color = crate::theme::MitosTheme::BORDER;
         let border = SolidColorBuffer::new(
             (panel_w, 1),
@@ -1371,14 +1360,12 @@ pub fn collect_notification_elements(
             1.0,
         ));
 
-        // 3. Title Text
         if let Some(tex) = &notif.title_tex {
             if let Ok(el) = tex.element(renderer, (start_x + 16, current_y + 16)) {
                 elements.push(ChromeRenderElement::Text(el));
             }
         }
 
-        // 4. Body Text
         if let Some(tex) = &notif.body_tex {
             if let Ok(el) = tex.element(renderer, (start_x + 16, current_y + 40)) {
                 elements.push(ChromeRenderElement::Text(el));
@@ -1390,7 +1377,6 @@ pub fn collect_notification_elements(
 
     elements
 }
-
 
 pub fn collect_auth_elements(
     renderer: &mut GlesRenderer,
@@ -1406,21 +1392,17 @@ pub fn collect_auth_elements(
     let x = (output_size.w - w) / 2;
     let y = (output_size.h - h) / 2;
 
-    // 1. Dim the background (Modal overlay)
     let dim = SolidColorBuffer::new(output_size, Color32F::new(0.0, 0.0, 0.0, 0.6));
     elements.extend(dim.render_elements(renderer, (0, 0).into(), scale, 1.0));
 
-    // 2. Glass Panel
     let bg_color = crate::theme::MitosTheme::effective_glass();
     let bg = SolidColorBuffer::new((w, h), Color32F::new(bg_color.r, bg_color.g, bg_color.b, 0.95));
     elements.extend(bg.render_elements(renderer, (x, y).into(), scale, 1.0));
 
-    // 3. Border
     let border = crate::theme::MitosTheme::BORDER;
     let b_buf = SolidColorBuffer::new((w, 1), Color32F::new(border.r, border.g, border.b, border.a));
     elements.extend(b_buf.render_elements(renderer, (x, y + h - 1).into(), scale, 1.0));
 
-    // 4. Password Field Background
     let field_w = w - 40;
     let field_h = 40;
     let field_x = x + 20;
@@ -1429,13 +1411,12 @@ pub fn collect_auth_elements(
     let field_bg = SolidColorBuffer::new((field_w, field_h), Color32F::new(0.0, 0.0, 0.0, 0.3));
     elements.extend(field_bg.render_elements(renderer, (field_x, field_y).into(), scale, 1.0));
 
-    // 5. Password Dots (Visual representation of typed characters)
     let dot_color = Color32F::new(1.0, 1.0, 1.0, 1.0);
     let dot_size = 8;
     let dot_spacing = 16;
     
     for (i, _) in auth.password.chars().enumerate() {
-        if i >= 20 { break; } // Max dots visible
+        if i >= 20 { break; } 
         
         let dot_x = field_x + 15 + (i as i32 * dot_spacing);
         let dot_y = field_y + (field_h / 2) - (dot_size / 2);
@@ -1447,7 +1428,96 @@ pub fn collect_auth_elements(
     elements
 }
 
+// ============================================================================
+// ON-SCREEN DISPLAY (OSD)
+// ============================================================================
 
+pub fn collect_osd_elements(
+    renderer: &mut GlesRenderer,
+    osd: &crate::state::OsdState,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+    
+    // Fade out after 2 seconds
+    if !osd.active || osd.last_updated.elapsed().as_secs() >= 2 {
+        return elements;
+    }
+
+    let (pill_w, pill_h) = (240, 48);
+    let x = (output_size.w - pill_w) / 2;
+    let y = output_size.h - 140; 
+
+    // Glass Background
+    let bg_color = crate::theme::MitosTheme::effective_glass();
+    let bg = SolidColorBuffer::new(
+        (pill_w, pill_h),
+        Color32F::new(bg_color.r, bg_color.g, bg_color.b, bg_color.a * 0.95),
+    );
+    elements.extend(bg.render_elements(renderer, (x, y).into(), scale, 1.0));
+
+    // Bottom Border
+    let border_color = crate::theme::MitosTheme::BORDER;
+    let border = SolidColorBuffer::new((pill_w, 1), Color32F::new(border_color.r, border_color.g, border_color.b, border_color.a));
+    elements.extend(border.render_elements(renderer, (x, y + pill_h - 1).into(), scale, 1.0));
+
+    // Progress Bar Track
+    let bar_w = pill_w - 80;
+    let bar_h = 8;
+    let bar_x = x + 60;
+    let bar_y = y + (pill_h / 2) - (bar_h / 2);
+    
+    let track = SolidColorBuffer::new((bar_w, bar_h), Color32F::new(1.0, 1.0, 1.0, 0.1));
+    elements.extend(track.render_elements(renderer, (bar_x, bar_y).into(), scale, 1.0));
+
+    // Progress Bar Fill
+    let fill_w = (bar_w as f32 * osd.value) as i32;
+    if fill_w > 0 {
+        let accent = crate::theme::MitosTheme::effective_accent();
+        let fill = SolidColorBuffer::new((fill_w, bar_h), Color32F::new(accent.r, accent.g, accent.b, accent.a));
+        elements.extend(fill.render_elements(renderer, (bar_x, bar_y).into(), scale, 1.0));
+    }
+
+    // Icon Placeholder
+    let icon_size = 24;
+    let icon_x = x + 20;
+    let icon_y = y + (pill_h / 2) - (icon_size / 2);
+    
+    let icon_color = match osd.icon {
+        crate::state::OsdIcon::Muted => Color32F::new(1.0, 0.3, 0.3, 1.0), 
+        _ => Color32F::new(1.0, 1.0, 1.0, 0.9), 
+    };
+    
+    let icon = SolidColorBuffer::new((icon_size, icon_size), icon_color);
+    elements.extend(icon.render_elements(renderer, (icon_x, icon_y).into(), scale, 1.0));
+
+    elements
+}
+
+// ============================================================================
+// NIGHT LIGHT (BLUE LIGHT FILTER)
+// ============================================================================
+
+pub fn collect_night_light_elements(
+    renderer: &mut GlesRenderer,
+    night_light: bool,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+    if !night_light { return elements; }
+
+    let night_tint = Color32F::new(1.0, 0.75, 0.45, 0.15); 
+    let tint_buf = SolidColorBuffer::new(output_size, night_tint);
+    elements.extend(tint_buf.render_elements(renderer, (0, 0).into(), scale, 1.0));
+    
+    elements
+}
+
+// ============================================================================
+// MASTER FRAME COMPOSITION
+// ============================================================================
 
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
@@ -1466,28 +1536,20 @@ pub fn collect_frame_elements(
     swipe_x: f64,
     output_width: i32,
     osd: &crate::state::OsdState,
+    night_light: bool,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
     // ------------------------------------------------------------
     // 1. WALLPAPER
     // ------------------------------------------------------------
-
-    let wallpaper_element =
-        wallpaper.render_element(renderer, output_size)?;
-
-    elements.push(
-        ChromeRenderElement::Wallpaper(wallpaper_element)
-    );
+    let wallpaper_element = wallpaper.render_element(renderer, output_size)?;
+    elements.push(ChromeRenderElement::Wallpaper(wallpaper_element));
 
     // ------------------------------------------------------------
-    // 2. MITOS SHELL
-    //    Dock + top bar
+    // 2. MITOS SHELL (Dock + top bar)
     // ------------------------------------------------------------
-
     elements.extend(shell_elements);
-
-
 
     // ------------------------------------------------------------
     // 3. WAYLAND APPLICATION WINDOWS (Workspace Aware)
@@ -1495,92 +1557,53 @@ pub fn collect_frame_elements(
     for window in space.elements().rev() {
         let win_ws = crate::wm::meta(window).workspace;
         
-        // Calculate relative workspace position
         let diff = win_ws as i32 - current_ws as i32;
-        
-        // Only render current workspace and immediate neighbors during swipe
         if diff.abs() > 1 { continue; }
         
         let Some(location) = space.element_location(window) else { continue; };
         
-        // Apply workspace offset + 1:1 swipe tracking
         let offset_x = (diff as f64 * output_width as f64) + (swipe_x * output_width as f64);
         let final_loc = Point::from((location.x as f64 + offset_x, location.y as f64));
 
-        // Draw Chrome (Shadows/Borders)
         elements.extend(collect_window_chrome_elements(
             renderer, window, final_loc.to_i32_round(), scale, window_chrome,
         ));
 
-        // Draw Window
         let physical_location = final_loc.to_physical(scale).to_i32_round();
         elements.extend(window.render_elements(renderer, physical_location, scale, 1.0));
     }
 
-
     // ------------------------------------------------------------
     // 4. XDG POPUPS (Menus, Tooltips)
     // ------------------------------------------------------------
-    // Smithay's PopupManager tracks popup geometry. We render them here.
-    elements.extend(
-        popups.render_elements(renderer, (0, 0).into(), scale, 1.0)
-    );
-        // ------------------------------------------------------------
+    elements.extend(popups.render_elements(renderer, (0, 0).into(), scale, 1.0));
+
+    // ------------------------------------------------------------
     // 4.5 NOTIFICATIONS (STAGE 6)
     // ------------------------------------------------------------
     elements.extend(collect_notification_elements(
-        renderer,
-        notifications,
-        output_size,
-        top_bar_height,
-        scale,
+        renderer, notifications, output_size, top_bar_height, scale,
     ));
 
-// --- ON-SCREEN DISPLAY (OSD) ---
-if osd.active && osd.last_updated.elapsed().as_secs() < 2 {
-    let (pill_w, pill_h) = (200, 48);
-    let x = (output_size.w - pill_w) / 2;
-    let y = output_size.h - 120; // Floating above the dock
-    
-    let bg = SolidColorBuffer::new(
-        (pill_w, pill_h),
-        Color32F::new(bg_color.r, bg_color.g, bg_color.b, bg_color.a * 0.9),
-    );
-    elements.extend(bg.render_elements(renderer, (x, y).into(), scale, 1.0));
-    
-    let bar_w = pill_w - 80;
-    let fill_w = (bar_w as f32 * osd.value) as i32;
-    let accent = crate::theme::MitosTheme::effective_accent();
-    let bar_fill = SolidColorBuffer::new((fill_w, 8), Color32F::new(accent.r, accent.g, accent.b, accent.a));
-    elements.extend(bar_fill.render_elements(renderer, (x + 60, y + 20).into(), scale, 1.0));
-}
- // --- NIGHT LIGHT (EYE COMFORT) ---
-if night_light {
-    // A subtle warm orange tint with low alpha
-    let night_tint = Color32F::new(1.0, 0.7, 0.4, 0.12); 
-    let tint_buf = SolidColorBuffer::new(output_size, night_tint);
-    elements.extend(tint_buf.render_elements(renderer, (0, 0).into(), scale, 1.0));
-}
-
+    // ------------------------------------------------------------
+    // 4.6 NIGHT LIGHT (EYE COMFORT)
+    // ------------------------------------------------------------
+    elements.extend(collect_night_light_elements(renderer, night_light, output_size, scale));
 
     // ------------------------------------------------------------
     // 5. MITOS OVERLAYS (Launcher, etc.)
     // ------------------------------------------------------------
     elements.extend(overlay_elements);
 
-    
-
     // ------------------------------------------------------------
     // 6. SECURE AUTHENTICATION OVERLAY
     // ------------------------------------------------------------
-    elements.extend(collect_auth_elements(
-        renderer,
-        auth,
-        output_size,
-        scale,
-    ));
+    elements.extend(collect_auth_elements(renderer, auth, output_size, scale));
 
-
+    // ------------------------------------------------------------
+    // 7. ON-SCREEN DISPLAY (OSD)
+    // ------------------------------------------------------------
+    elements.extend(collect_osd_elements(renderer, osd, output_size, scale));
 
     Ok(elements)
 }
@@ -1591,9 +1614,5 @@ pub fn render_top_bar_clock(
     _panel: &GlassPanel,
     _scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
-    // Text rendering requires a font atlas or Pango integration.
-    // For now, we'll just return empty and rely on the shell_interaction
-    // module to provide the time string to a future text renderer.
     Vec::new()
 }
-
