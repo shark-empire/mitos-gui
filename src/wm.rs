@@ -9,6 +9,7 @@
 //! Geometry policy lives here. Rendering stays in renderer.rs.
 
 use std::sync::{Mutex, MutexGuard};
+use std::collections::HashMap;
 
 use smithay::desktop::Window;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -72,7 +73,8 @@ impl Default for WindowMeta {
         Self {
             saved: None,
             maximized: false,
-            fullscreen: false
+            fullscreen: false,
+            workspace: HashMap::new(),
     }
 
     let start_size = window.geometry().size;
