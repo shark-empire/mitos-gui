@@ -26,38 +26,38 @@ use smithay::backend::allocator::gbm::{
     GbmBufferFlags,
     GbmDevice,
 };
-use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::{
     compositor::DrmCompositor,
     DrmDevice,
     DrmDeviceFd,
     DrmEvent,
+    exporter::gbm::GbmFramebufferExporter,
 };
 use smithay::backend::egl::{EGLContext, EGLDisplay};
-use smithay::backend::libinput::{
-    LibinputInputBackend,
-    LibinputSession,
-};
+
 use smithay::backend::renderer::element::solid::SolidColorBuffer;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::Color32F;
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::Session;
+use smithay::backend::libinput::LibinputInputBackend;
 
 use smithay::reexports::drm::control::{
     connector,
-    crtc,
     Device as ControlDevice,
 };
+
+use smithay::reexports::input::Libinput;
 
 use smithay::input::keyboard::XkbConfig;
 use smithay::input::SeatState;
 use smithay::output::{
-    Mode,
+    Mode as SmithayMode,
     Output,
     PhysicalProperties,
     Subpixel,
 };
+
 use smithay::utils::{Scale, Transform};
 use smithay::reexports::wayland_server::{
     Display,
@@ -85,7 +85,7 @@ struct DrmOutputState {
     output: Output,
     compositor: DrmCompositor<
         GbmAllocator<DrmDeviceFd>,
-        GbmDevice<DrmDeviceFd>,
+        GbmFramebufferExporter<DrmDeviceFd>, // <-- FIXED generic type
         (),
         DrmDeviceFd,
     >,
@@ -124,7 +124,7 @@ fn create_output(
     output.create_global::<MitosGuiState>(display_handle);
 
     let size = (mode.size().0 as i32, mode.size().1 as i32);
-    let out_mode = Mode { size: size.into(), refresh: mode.vrefresh() as i32 * 1000 };
+    let out_mode = SmithayMode { size: size.into(), refresh: mode.vrefresh() as i32 * 1000 }; // <-- ALIASED
     
     output.change_current_state(
         Some(out_mode), 
@@ -139,7 +139,7 @@ fn create_output(
         surface,
         None,
         GbmAllocator::new(fd.clone(), GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT),
-        gbm.clone(),
+        GbmFramebufferExporter::new(gbm.clone()), // <-- CORRECT exporter
         renderer.dmabuf_formats(),
         None,
         fd.clone(),
@@ -261,9 +261,11 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         })?;
     }
 
-    // Libinput
-    let libinput_session = LibinputSession::new(session.clone());
-    let input_backend = LibinputInputBackend::new(libinput_session);
+    // Libinput initialization for Smithay 0.7
+    let mut context = Libinput::new_with_udev(session.clone());
+    context.udev_assign_seat("seat0").unwrap();
+    let input_backend = LibinputInputBackend::new(context);
+
     {
         let outputs_rc = outputs_rc.clone();
         event_loop.handle().insert_source(
