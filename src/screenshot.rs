@@ -1,33 +1,33 @@
 //! Screen capture (Screenshots)
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::backend::renderer::{Bind, ExportMem, Offscreen, Renderer};
+use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::RenderElement; // Correct trait for Smithay 0.7
 use smithay::utils::{Physical, Rectangle, Size, Transform};
 use image::RgbaImage;
 
-pub fn take_screenshot<E>(
+pub fn take_screenshot<'a, E>(
     renderer: &mut GlesRenderer,
     output_size: Size<i32, Physical>,
-    elements: &[E],
+    elements: &'a [E],
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    E: smithay::backend::renderer::element::Element<GlesRenderer>,
+    E: RenderElement<GlesRenderer> + 'a,
 {
     // 1. Create offscreen buffer
     let mut texture = renderer.create_buffer(Fourcc::Abgr8888, output_size)?;
     let mut target = renderer.bind(&mut texture)?;
     let mut tracker = OutputDamageTracker::new(output_size, 1.0, Transform::Normal);
-    tracker.render_output(renderer, &mut target, 0, [0.0, 0.0, 0.0, 1.0].into(), elements)?; 
     
-    // 2. Render elements to the offscreen target (force full damage)
-    let _ = render_output(
+    // 2. Render elements to the offscreen target (force full damage by passing age=0)
+    // render_output is a method on OutputDamageTracker, not a free function.
+    tracker.render_output(
         renderer,
         &mut target,
-        &mut tracker,
-        0,
-        [0.0, 0.0, 0.0, 1.0], // Clear color
+        0, // age
         elements.iter(),
+        [0.0, 0.0, 0.0, 1.0], // Clear color
     )?;
 
     // 3. Copy framebuffer to CPU memory
