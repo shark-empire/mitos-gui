@@ -9,7 +9,7 @@ Same to keyboard.rs
 //! - Stage 7 OSD (On-Screen Display) for media keys
 //! - Stage 7 Night Light toggle
 //! - Forward normal keys to the focused Wayland client
-
+use smithay::input::keyboard::Keysym;
 use smithay::backend::input::{
     Event,
     InputBackend,
@@ -25,6 +25,19 @@ use smithay::input::keyboard::{
 use smithay::utils::SERIAL_COUNTER;
 
 use crate::state::MitosGuiState;
+
+fn keysym_to_char(keysym: Keysym) -> Option<char> {
+    let raw = keysym.raw();
+    if (0x20..=0x7E).contains(&raw) {
+        char::from_u32(raw)
+    } else if raw == 0xFF0D { // Enter
+        Some('\n')
+    } else if raw == 0xFF08 { // Backspace
+        Some('\x08')
+    } else {
+        None
+    }
+}
 
 /// Feed one raw keyboard event into the MITOS seat.
 pub fn handle_keyboard_key<B: InputBackend>(
