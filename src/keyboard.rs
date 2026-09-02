@@ -1,156 +1,270 @@
-use smithay::backend::input::{Event, InputBackend, KeyboardKeyEvent, KeyState};
-use smithay::input::keyboard::{keysyms, FilterResult, Keysym, ModifiersState};
+Same to keyboard.rs
+
+//! Keyboard input.
+//!
+//! Stage 4, 5 & 7 keyboard handling:
+//! - Launcher search navigation (when open)
+//! - Super + Space toggles the MITOS launcher
+//! - Stage 4 window manager shortcuts (close, maximize, snap, etc.)
+//! - Stage 7 OSD (On-Screen Display) for media keys
+//! - Stage 7 Night Light toggle
+//! - Forward normal keys to the focused Wayland client
+
+use smithay::backend::input::{
+    Event,
+    InputBackend,
+    KeyboardKeyEvent,
+    KeyState,
+};
+
+use smithay::input::keyboard::{
+    keysyms,
+    FilterResult,
+};
+
 use smithay::utils::SERIAL_COUNTER;
 
 use crate::state::MitosGuiState;
 
 /// Feed one raw keyboard event into the MITOS seat.
-pub fn handle_keyboard_key<B: InputBackend>(state: &mut MitosGuiState, event: B::KeyboardKeyEvent) {
-    let Some(keyboard) = state.seat.get_keyboard() else { return; };
+pub fn handle_keyboard_key<B: InputBackend>(
+    state: &mut MitosGuiState,
+    event: B::KeyboardKeyEvent,
+) {
+    let Some(keyboard) = state.seat.get_keyboard() else {
+        return;
+    };
 
     let serial = SERIAL_COUNTER.next_serial();
     let time = event.time_msec();
     let keycode = event.key_code();
     let key_state = event.state();
 
-    keyboard.input::<(), _>(state, keycode, key_state, serial, time, |state, mods, sym| {
-        let keysym = sym.modified_sym();
+    keyboard.input::<(), _>(
+        state,
+        keycode,
+        key_state,
+        serial,
+        time,
+        |state, mods, sym| {
+            let keysym = sym.modified_sym();
 
-        if state.auth.active {
-            return handle_auth_input(state, keysym, key_state);
-        }
-
-        if key_state == KeyState::Pressed && handle_media_keys(state, keysym) {
-            return FilterResult::Intercept(());
-        }
-
-        if state.shell.launcher_visible {
-            return handle_launcher_input(state, keysym, key_state);
-        }
-
-        if mods.logo && key_state == KeyState::Pressed {
-            if let Some(intercept) = handle_wm_shortcuts(state, mods, keysym) {
-                return intercept;
+            // --------------------------------------------------------
+            // SECURE AUTHENTICATION PROMPT (Highest Priority)
+            // --------------------------------------------------------
+            if state.auth.active {
+                return handle_auth_input(state, keysym, key_state);
             }
-        }
 
-        FilterResult::Forward
-    });
-}
+            // --------------------------------------------------------
+            // Stage 6 & 7: hardware media keys & OSD
+            // --------------------------------------------------------
+            if key_state == KeyState::Pressed {
+                match keysym {
+                    keysyms::KEY_XF86AudioRaiseVolume => {
+                        state.muted = false;
+                        state.volume = state.volume.saturating_add(5).min(100);
+                        state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
+                        state.pending_full_redraw = true;
+                        return FilterResult::Intercept(());
+                    }
 
-fn handle_media_keys(state: &mut MitosGuiState, keysym: Keysym) -> bool {
-    match keysym {
-        keysyms::KEY_XF86AudioRaiseVolume => {
-            state.muted = false;
-            state.volume = state.volume.saturating_add(5).min(100);
-            state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
-            state.pending_full_redraw = true;
-            true
-        }
-        keysyms::KEY_XF86AudioLowerVolume => {
-            state.muted = false;
-            state.volume = state.volume.saturating_sub(5);
-            state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
-            state.pending_full_redraw = true;
-            true
-        }
-        keysyms::KEY_XF86AudioMute => {
-            state.muted = !state.muted;
-            let icon = if state.muted { crate::state::OsdIcon::Muted } else { crate::state::OsdIcon::Volume };
-            state.osd.trigger(icon, if state.muted { 0.0 } else { state.volume as f32 / 100.0 });
-            state.pending_full_redraw = true;
-            true
-        }
-        _ => false,
-    }
-}
+                    keysyms::KEY_XF86AudioLowerVolume => {
+                        state.muted = false;
+                        state.volume = state.volume.saturating_sub(5);
+                        state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
+                        state.pending_full_redraw = true;
+                        return FilterResult::Intercept(());
+                    }
 
-fn handle_wm_shortcuts(
-    state: &mut MitosGuiState,
-    mods: &ModifiersState,
-    keysym: Keysym,
-) -> Option<FilterResult<()>> {
-    let active_monitor = state.active_output_name();
+                    keysyms::KEY_XF86AudioMute => {
+                        state.muted = !state.muted;
+                        let icon = if state.muted { crate::state::OsdIcon::Muted } else { crate::state::OsdIcon::Volume };
+                        state.osd.trigger(icon, if state.muted { 0.0 } else { state.volume as f32 / 100.0 });
+                        state.pending_full_redraw = true;
+                        return FilterResult::Intercept(());
+                    }
 
-    // Launcher Toggle (Super + Space)
-    if keysym == keysyms::KEY_space {
-        state.shell.toggle_launcher();
-        state.pending_full_redraw = true;
-        return Some(FilterResult::Intercept(()));
-    }
-
-    // Diagnostics & Auth
-    if mods.shift {
-        match keysym {
-            keysyms::KEY_N => {
-                state.toggle_night_light();
-                return Some(FilterResult::Intercept(()));
-            }
-            keysyms::KEY_A => {
-                state.auth.request("MITOS Package Manager", "Install system updates");
-                state.pending_full_redraw = true;
-                return Some(FilterResult::Intercept(()));
-            }
-            keysyms::KEY_R => {
-                crate::session::reboot();
-                return Some(FilterResult::Intercept(()));
-            }
-            _ => {}
-        }
-    } else if keysym == keysyms::KEY_n {
-        state.notifications.push("MITOS System", "Notification Engine Active", "Stage 6 desktop services are online.");
-        state.pending_full_redraw = true;
-        return Some(FilterResult::Intercept(()));
-    }
-
-    // Window Management
-    match keysym {
-        keysyms::KEY_q => crate::wm::close_focused(state),
-        keysyms::KEY_f => crate::wm::toggle_fullscreen(state),
-        keysyms::KEY_Up => crate::wm::toggle_maximize(state),
-        keysyms::KEY_Down => {
-            if mods.shift { crate::wm::restore_minimized(state) } else { crate::wm::minimize_focused(state) }
-        }
-        keysyms::KEY_Left => crate::wm::snap(state, crate::wm::SnapSide::Left),
-        keysyms::KEY_Right => crate::wm::snap(state, crate::wm::SnapSide::Right),
-        keysyms::KEY_Tab => crate::wm::cycle_focus(state),
-        keysyms::KEY_Print | keysyms::KEY_Sys_Req => {
-            state.pending_screenshot = true;
-            state.pending_full_redraw = true;
-        }
-        // Workspace Switching & Moving
-        keysyms::KEY_1 | keysyms::KEY_2 | keysyms::KEY_3 | keysyms::KEY_4 => {
-            let target = match keysym {
-                keysyms::KEY_1 => 0,
-                keysyms::KEY_2 => 1,
-                keysyms::KEY_3 => 2,
-                keysyms::KEY_4 => 3,
-                _ => unreachable!(),
-            };
-
-            if mods.shift {
-                if let Some(win) = state.focused_window.clone() {
-                    crate::wm::meta(&win).workspace = target;
+                    _ => {}
                 }
             }
-            state.switch_workspace(&active_monitor, target);
-        }
-        _ => return None, // Not a WM shortcut
-    }
 
-    Some(FilterResult::Intercept(()))
+            // --------------------------------------------------------
+            // LAUNCHER SEARCH NAVIGATION
+            // If the launcher is open, it captures ALL keyboard input.
+            // --------------------------------------------------------
+            if state.shell.launcher_visible {
+                return handle_launcher_input(state, keysym, key_state);
+            }
+
+            // --------------------------------------------------------
+            // MITOS launcher shortcut
+            //
+            // Super + Space
+            // --------------------------------------------------------
+            if mods.logo && keysym == keysyms::KEY_space.into() {
+                state.shell.toggle_launcher();
+                state.pending_full_redraw = true; // Force redraw to show/hide launcher
+
+                tracing::info!(
+                    "MITOS: launcher {}",
+                    if state.shell.launcher_visible {
+                        "opened"
+                    } else {
+                        "closed"
+                    }
+                );
+
+                return FilterResult::Intercept(());
+            }
+
+            // --------------------------------------------------------
+            // Stage 4 & 7 Window Manager & Desktop shortcuts
+            // --------------------------------------------------------
+            if mods.logo {
+
+                // Super + N: Push a test notification (Stage 6)
+                if !mods.shift && keysym == keysyms::KEY_n.into() {
+                    state.notifications.push(
+                        "MITOS System",
+                        "Notification Engine Active",
+                        "Stage 6 desktop services are online.",
+                    );
+                    state.pending_full_redraw = true;
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Shift + N: Toggle Night Light (Stage 7)
+                if mods.shift && keysym == keysyms::KEY_n.into() {
+                    state.toggle_night_light();
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Shift + A: Trigger mock auth prompt
+                if mods.shift && keysym == keysyms::KEY_a.into() {
+                    state.auth.request("MITOS Package Manager", "Install system updates");
+                    state.pending_full_redraw = true;
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Shift + R: Reboot via mitos-init
+                if mods.shift && keysym == keysyms::KEY_r.into() {
+                    crate::session::reboot();
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Q: Close focused window
+                if keysym == keysyms::KEY_q.into() {
+                    crate::wm::close_focused(state);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + F: Toggle fullscreen
+                if keysym == keysyms::KEY_f.into() {
+                    crate::wm::toggle_fullscreen(state);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Up: Toggle maximize
+                if keysym == keysyms::KEY_Up.into() {
+                    crate::wm::toggle_maximize(state);
+                    return FilterResult::Intercept(());
+                }
+
+                 // Super + PrintScreen: Screenshot
+                if keysym == keysyms::KEY_Print.into() || keysym == keysyms::KEY_Sys_Req.into() {
+                    state.pending_screenshot = true;
+                    state.pending_full_redraw = true;
+                    return FilterResult::Intercept(());
+                }
+
+                // Example for Super + 2:
+               if mods.logo && keysym == keysyms::KEY_2.into() {
+               let active_monitor = state.active_output_name();
+               state.switch_workspace(&active_monitor, 1); // Workspace index 1
+              return FilterResult::Intercept(());
+                }
+
+
+                // Super + Down: Minimize
+                // Super + Shift + Down: Restore last minimized
+                if keysym == keysyms::KEY_Down.into() {
+                    if mods.shift {
+                        crate::wm::restore_minimized(state);
+                    } else {
+                        crate::wm::minimize_focused(state);
+                    }
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Left: Snap to left half
+                if keysym == keysyms::KEY_Left.into() {
+                    crate::wm::snap(state, crate::wm::SnapSide::Left);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Right: Snap to right half
+                if keysym == keysyms::KEY_Right.into() {
+                    crate::wm::snap(state, crate::wm::SnapSide::Right);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Tab: Cycle focus through mapped windows
+                if keysym == keysyms::KEY_Tab.into() {
+                    crate::wm::cycle_focus(state);
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + 1/2/3/4: Switch Workspace
+                if keysym == keysyms::KEY_1.into() { state.switch_workspace(0); return FilterResult::Intercept(()); }
+                if keysym == keysyms::KEY_2.into() { state.switch_workspace(1); return FilterResult::Intercept(()); }
+                if keysym == keysyms::KEY_3.into() { state.switch_workspace(2); return FilterResult::Intercept(()); }
+                if keysym == keysyms::KEY_4.into() { state.switch_workspace(3); return FilterResult::Intercept(()); }
+
+                // Super + Shift + 1/2/3/4: Move focused window to Workspace
+                if mods.shift {
+                    if let Some(win) = state.focused_window.clone() {
+                        let target = match keysym {
+                            keysyms::KEY_1 => Some(0),
+                            keysyms::KEY_2 => Some(1),
+                            keysyms::KEY_3 => Some(2),
+                            keysyms::KEY_4 => Some(3),
+                            _ => None,
+                        };
+                        if let Some(t) = target {
+                            crate::wm::meta(&win).workspace = t;
+                            state.switch_workspace(t); // Follow the window
+                            return FilterResult::Intercept(());
+                        }
+                    }
+                }
+            }
+
+            // --------------------------------------------------------
+            // Normal keyboard input
+            // --------------------------------------------------------
+            FilterResult::Forward
+        },
+    );
 }
 
+/// Handles typing, navigation, and execution inside the open launcher.
 fn handle_launcher_input(
     state: &mut MitosGuiState,
-    keysym: Keysym,
+    keysym: u32,
     key_state: KeyState,
 ) -> FilterResult<()> {
-    if key_state != KeyState::Pressed { return FilterResult::Intercept(()); }
+    // Only act on key presses, ignore releases
+    if key_state != KeyState::Pressed {
+        return FilterResult::Intercept(());
+    }
 
     match keysym {
-        keysyms::KEY_Escape => state.shell.toggle_launcher(),
+        keysyms::KEY_Escape => {
+            state.shell.toggle_launcher();
+        }
         keysyms::KEY_Return => {
+            // Launch the currently selected app
             if let Some(app) = state.shell.launcher_results.get(state.shell.launcher_selected) {
                 crate::shell_interaction::launch_app_entry(app);
             }
@@ -162,15 +276,21 @@ fn handle_launcher_input(
         }
         keysyms::KEY_Down => {
             if !state.shell.launcher_results.is_empty() {
-                state.shell.launcher_selected = (state.shell.launcher_selected + 1) % state.shell.launcher_results.len();
+                state.shell.launcher_selected = 
+                    (state.shell.launcher_selected + 1) % state.shell.launcher_results.len();
             }
         }
         keysyms::KEY_Up => {
             if !state.shell.launcher_results.is_empty() {
-                state.shell.launcher_selected = state.shell.launcher_selected.checked_sub(1).unwrap_or(state.shell.launcher_results.len() - 1);
+                if state.shell.launcher_selected == 0 {
+                    state.shell.launcher_selected = state.shell.launcher_results.len() - 1;
+                } else {
+                    state.shell.launcher_selected -= 1;
+                }
             }
         }
         _ => {
+            // Convert keysym to a character and append to query
             if let Some(c) = keysym_to_char(keysym) {
                 if c.is_ascii_graphic() || c == ' ' {
                     state.shell.launcher_query.push(c);
@@ -180,15 +300,20 @@ fn handle_launcher_input(
         }
     }
 
-    state.pending_full_redraw = true;
+    state.pending_full_redraw = true; // Force a redraw to show the new text/selection
     FilterResult::Intercept(())
 }
 
+/// Re-runs the search algorithm when the query changes.
 fn update_launcher_results(state: &mut MitosGuiState) {
-    state.shell.launcher_results = crate::shell_interaction::search_apps(&state.launcher_apps, &state.shell.launcher_query);
-    state.shell.launcher_selected = 0;
+    state.shell.launcher_results = crate::shell_interaction::search_apps(
+        &state.launcher_apps,
+        &state.shell.launcher_query,
+    );
+    state.shell.launcher_selected = 0; // Reset selection to top result
 }
 
+/// Toggle the MITOS launcher programmatically.
 pub fn toggle_launcher(state: &mut MitosGuiState) {
     state.shell.toggle_launcher();
     state.pending_full_redraw = true;
@@ -196,23 +321,26 @@ pub fn toggle_launcher(state: &mut MitosGuiState) {
 
 fn keysym_to_char(keysym: Keysym) -> Option<char> {
     let raw = keysym.raw();
+    // Handle basic ASCII printable characters (Space to Tilde)
     if (0x20..=0x7E).contains(&raw) {
         char::from_u32(raw)
+    } else if raw == 0xFF0D { // Return / Enter
+        Some('\n')
+    } else if raw == 0xFF08 { // Backspace
+        Some('\x08')
     } else {
-        match raw {
-            0xFF0D => Some('\n'),
-            0xFF08 => Some('\x08'),
-            _ => None,
-        }
+        None
     }
 }
 
 fn handle_auth_input(
     state: &mut MitosGuiState,
-    keysym: Keysym,
+    keysym: u32,
     key_state: KeyState,
 ) -> FilterResult<()> {
-    if key_state != KeyState::Pressed { return FilterResult::Intercept(()); }
+    if key_state != KeyState::Pressed {
+        return FilterResult::Intercept(());
+    }
 
     match keysym {
         keysyms::KEY_Escape => {
