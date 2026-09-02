@@ -1,4 +1,3 @@
-Same to keyboard.rs
 
 //! Keyboard input.
 //!
