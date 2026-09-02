@@ -317,6 +317,20 @@ pub fn toggle_launcher(state: &mut MitosGuiState) {
     state.pending_full_redraw = true;
 }
 
+fn keysym_to_char(keysym: Keysym) -> Option<char> {
+    let raw = keysym.raw();
+    // Handle basic ASCII printable characters (Space to Tilde)
+    if (0x20..=0x7E).contains(&raw) {
+        char::from_u32(raw)
+    } else if raw == 0xFF0D { // Return / Enter
+        Some('\n')
+    } else if raw == 0xFF08 { // Backspace
+        Some('\x08')
+    } else {
+        None
+    }
+}
+
 fn handle_auth_input(
     state: &mut MitosGuiState,
     keysym: u32,
