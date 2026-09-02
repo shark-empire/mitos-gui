@@ -1,13 +1,11 @@
 //! True Frosted Glass implementation using custom GLES shaders.
 
-use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::gles::{
     GlesError, GlesFrame, GlesRenderer, GlesTexProgram, GlesTexture, Uniform, UniformValue,
 };
-use smithay::backend::renderer::{
-    element::Element, Bind, Offscreen, Renderer,
-};
-use smithay::utils::{Buffer, Physical, Rectangle, Size, Transform};
+use smithay::backend::renderer::element::{Element, RenderElement, Id};
+use smithay::backend::renderer::utils::CommitCounter;
+use smithay::utils::{Buffer, Physical, Rectangle, Transform};
 
 /// The GLSL fragment shader for the frosted glass effect.
 /// It performs a 9-tap Gaussian cross-blur and applies tint + highlights.
@@ -97,16 +95,36 @@ pub struct FrostedGlassElement {
     pub program: GlesTexProgram,
     pub tint: [f32; 4],
     pub border: [f32; 4],
+    pub id: Id,
 }
 
-impl Element<GlesRenderer> for FrostedGlassElement {
-    fn id(&self) -> &smithay::backend::renderer::element::Id {
-        // Use a static ID or generate one based on geometry
-        &smithay::backend::renderer::element::Id::from("mitos-frosted-glass")
+impl FrostedGlassElement {
+    pub fn new(
+        geometry: Rectangle<i32, Physical>,
+        bg_texture: GlesTexture,
+        program: GlesTexProgram,
+        tint: [f32; 4],
+        border: [f32; 4],
+    ) -> Self {
+        Self {
+            geometry,
+            bg_texture,
+            program,
+            tint,
+            border,
+            id: Id::new(), // Generate a persistent unique ID once per element
+        }
+    }
+}
+
+// 1. Basic Geometry and Commit Tracking
+impl Element for FrostedGlassElement {
+    fn id(&self) -> &Id {
+        &self.id
     }
 
-    fn current_commit(&self) -> smithay::utils::Serial {
-        smithay::utils::Serial::from(0)
+    fn current_commit(&self) -> CommitCounter {
+        CommitCounter::default()
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
@@ -117,10 +135,13 @@ impl Element<GlesRenderer> for FrostedGlassElement {
         )
     }
 
-    fn geometry(&self, _scale: smithay::utils::Scale) -> Rectangle<i32, Physical> {
+    fn geometry(&self, _scale: smithay::utils::Scale<f64>) -> Rectangle<i32, Physical> {
         self.geometry
     }
+}
 
+// 2. The GlesRenderer Drawing Logic
+impl RenderElement<GlesRenderer> for FrostedGlassElement {
     fn draw(
         &self,
         frame: &mut GlesFrame<'_, '_>,
