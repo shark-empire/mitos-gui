@@ -12,8 +12,9 @@
 //! - client window composition
 //!
 //! Wayland itself does not provide the MITOS glass effect.
-//! The visual shell is deliberately implemented here.
-pub mod frosted_glass;
+//! The visual shell is deliberately implemented here
+
+mod renderer;
 
 use smithay::{
     backend::{
