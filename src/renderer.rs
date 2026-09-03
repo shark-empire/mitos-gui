@@ -1587,7 +1587,9 @@ pub fn collect_frame_elements(
     // ------------------------------------------------------------
     // 1. WALLPAPER
     // ------------------------------------------------------------
-    let wallpaper_element = wallpaper.render_element(renderer, output_size)?;
+    let buffer_size = output_size.to_physical(scale).to_buffer(1, smithay::utils::Transform::Normal);
+    let wallpaper_element = wallpaper.render_element(renderer, buffer_size)?;
+
     elements.push(ChromeRenderElement::Wallpaper(wallpaper_element));
 
     // ------------------------------------------------------------
@@ -1620,7 +1622,11 @@ pub fn collect_frame_elements(
     // ------------------------------------------------------------
     // 4. XDG POPUPS (Menus, Tooltips)
     // ------------------------------------------------------------
-    elements.extend(popups.render_elements(renderer, (0, 0).into(), scale, 1.0));
+    for (popup, location) in popups.tracked_popups() {
+    let physical_loc = location.to_physical(scale).to_i32_round();
+    elements.extend(popup.render_elements(renderer, physical_loc, scale, 1.0));
+      }
+
 
     // ------------------------------------------------------------
     // 4.5 NOTIFICATIONS (STAGE 6)
