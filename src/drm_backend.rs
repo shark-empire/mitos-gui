@@ -18,7 +18,7 @@ use std::time::Duration;
 use calloop::EventLoop;
 use calloop::timer::{Timer, TimeoutAction};
 
-use rustix::fs::OFlags;
+use smithay::reexports::rustix::fs::OFlags;
 
 
 
@@ -171,7 +171,10 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let display_handle = display.handle();
 
     let node = pick_card().ok_or("no /dev/dri/cardN found")?;
-    let fd = session.open(Path::new(&node), OFlags::RDWR | OFlags::CLOEXEC)?;
+    let fd = session.open(
+    Path::new(&node),
+    OFlags::RDWR | OFlags::CLOEXEC,
+)?;
     let fd = DrmDeviceFd::new(fd.into());
 
     let (drm, drm_event_source) = DrmDevice::new(fd.clone(), false)?;
