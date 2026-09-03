@@ -417,10 +417,14 @@ pub fn clear_color(
 // RENDER ELEMENT TYPES
 // ============================================================================
 
+#[derive(Debug, Clone)]
+struct WallpaperElement(MemoryRenderBufferRenderElement<GlesRenderer>);
+
+// Update your macro:
 render_elements! {
     pub ChromeRenderElement<=GlesRenderer>;
+    Wallpaper=WallpaperElement, // Use the wrapper instead
 
-    Wallpaper=MemoryRenderBufferRenderElement<GlesRenderer>,
     Text=MemoryRenderBufferRenderElement<GlesRenderer>,
     Glass=PixelShaderElement,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
