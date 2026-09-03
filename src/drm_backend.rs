@@ -18,7 +18,9 @@ use std::time::Duration;
 use calloop::EventLoop;
 use calloop::timer::{Timer, TimeoutAction};
 
-use nix::fcntl::OFlag;
+use rustix::fs::OFlags;
+
+
 
 use smithay::backend::allocator::gbm::{
     GbmAllocator,
@@ -136,7 +138,8 @@ fn create_output(
     output.set_preferred(out_mode);
 
     let color_formats = [Fourcc::Argb8888, Fourcc::Xrgb8888];
-    let renderer_formats: Vec<_> = renderer.dmabuf_formats().collect();
+    let renderer_formats: Vec<_> = renderer.dmabuf_formats().into_iter().collect();
+
     let cursor_size = Size::<u32, Buffer>::from((64, 64));
 
     let compositor = DrmCompositor::new(
@@ -168,7 +171,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let display_handle = display.handle();
 
     let node = pick_card().ok_or("no /dev/dri/cardN found")?;
-    let fd = session.open(Path::new(&node), OFlag::O_RDWR | OFlag::O_CLOEXEC)?;
+    let fd = session.open(Path::new(&node), OFlags::RDWR | OFlags::CLOEXEC)?;
     let fd = DrmDeviceFd::new(fd.into());
 
     let (drm, drm_event_source) = DrmDevice::new(fd.clone(), false)?;
