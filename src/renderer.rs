@@ -16,6 +16,9 @@
 
 pub mod frosted_glass;
 
+use smithay::backend::renderer::Bind;
+use smithay::backend::renderer::Offscreen;
+
 use smithay::{
     backend::{
         allocator::Fourcc,
