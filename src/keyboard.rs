@@ -65,14 +65,14 @@ pub fn handle_keyboard_key<B: InputBackend>(
             // SECURE AUTHENTICATION PROMPT (Highest Priority)
             // --------------------------------------------------------
             if state.auth.active {
-                return handle_auth_input(state, keysym, key_state);
+                return handle_auth_input(state, keysym.into(), key_state);
             }
 
             // --------------------------------------------------------
             // Stage 6 & 7: hardware media keys & OSD
             // --------------------------------------------------------
             if key_state == KeyState::Pressed {
-                match keysym {
+                match keysym.raw() {
                     keysyms::KEY_XF86AudioRaiseVolume => {
                         state.muted = false;
                         state.volume = state.volume.saturating_add(5).min(100);
@@ -106,7 +106,7 @@ pub fn handle_keyboard_key<B: InputBackend>(
             // If the launcher is open, it captures ALL keyboard input.
             // --------------------------------------------------------
             if state.shell.launcher_visible {
-                return handle_launcher_input(state, keysym, key_state);
+                return handle_launcher_input(state, keysym.into(), key_state);
             }
 
             // --------------------------------------------------------
@@ -190,14 +190,6 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     return FilterResult::Intercept(());
                 }
 
-                // Example for Super + 2:
-               if mods.logo && keysym == keysyms::KEY_2.into() {
-               let active_monitor = state.active_output_name();
-               state.switch_workspace(&active_monitor, 1); // Workspace index 1
-              return FilterResult::Intercept(());
-                }
-
-
                 // Super + Down: Minimize
                 // Super + Shift + Down: Restore last minimized
                 if keysym == keysyms::KEY_Down.into() {
@@ -227,16 +219,26 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     return FilterResult::Intercept(());
                 }
 
-                // Super + 1/2/3/4: Switch Workspace
-                if keysym == keysyms::KEY_1.into() { state.switch_workspace(0); return FilterResult::Intercept(()); }
-                if keysym == keysyms::KEY_2.into() { state.switch_workspace(1); return FilterResult::Intercept(()); }
-                if keysym == keysyms::KEY_3.into() { state.switch_workspace(2); return FilterResult::Intercept(()); }
-                if keysym == keysyms::KEY_4.into() { state.switch_workspace(3); return FilterResult::Intercept(()); }
+                // Super + 1/2/3/4: Switch Workspace (on the monitor under the pointer)
+                if !mods.shift {
+                    let target = match keysym.raw() {
+                        keysyms::KEY_1 => Some(0),
+                        keysyms::KEY_2 => Some(1),
+                        keysyms::KEY_3 => Some(2),
+                        keysyms::KEY_4 => Some(3),
+                        _ => None,
+                    };
+                    if let Some(ws) = target {
+                        let active = state.active_output_name();
+                        state.switch_workspace(&active, ws);
+                        return FilterResult::Intercept(());
+                    }
+                }
 
                 // Super + Shift + 1/2/3/4: Move focused window to Workspace
                 if mods.shift {
                     if let Some(win) = state.focused_window.clone() {
-                        let target = match keysym {
+                        let target = match keysym.raw() {
                             keysyms::KEY_1 => Some(0),
                             keysyms::KEY_2 => Some(1),
                             keysyms::KEY_3 => Some(2),
@@ -244,8 +246,9 @@ pub fn handle_keyboard_key<B: InputBackend>(
                             _ => None,
                         };
                         if let Some(t) = target {
-                            crate::wm::meta(&win).workspace = t;
-                            state.switch_workspace(t); // Follow the window
+                            let active = state.active_output_name();
+                            crate::wm::meta(&win).workspace.insert(active.clone(), t);
+                            state.switch_workspace(&active, t); // Follow the window
                             return FilterResult::Intercept(());
                         }
                     }
@@ -303,7 +306,7 @@ fn handle_launcher_input(
         }
         _ => {
             // Convert keysym to a character and append to query
-            if let Some(c) = keysym_to_char(keysym) {
+            if let Some(c) = keysym_to_char(keysym.into()) {
                 if c.is_ascii_graphic() || c == ' ' {
                     state.shell.launcher_query.push(c);
                     update_launcher_results(state);
@@ -331,20 +334,6 @@ pub fn toggle_launcher(state: &mut MitosGuiState) {
     state.pending_full_redraw = true;
 }
 
-fn keysym_to_char(keysym: Keysym) -> Option<char> {
-    let raw = keysym.raw();
-    // Handle basic ASCII printable characters (Space to Tilde)
-    if (0x20..=0x7E).contains(&raw) {
-        char::from_u32(raw)
-    } else if raw == 0xFF0D { // Return / Enter
-        Some('\n')
-    } else if raw == 0xFF08 { // Backspace
-        Some('\x08')
-    } else {
-        None
-    }
-}
-
 fn handle_auth_input(
     state: &mut MitosGuiState,
     keysym: u32,
@@ -370,7 +359,7 @@ fn handle_auth_input(
             state.auth.password.pop();
         }
         _ => {
-            if let Some(c) = keysym_to_char(keysym) {
+            if let Some(c) = keysym_to_char(keysym.into()) {
                 if c.is_ascii_graphic() || c == ' ' {
                     state.auth.password.push(c);
                 }

@@ -96,11 +96,7 @@ pub enum SnapSide {
 // ============================================================================
 
 fn toplevel(window: &Window) -> Option<ToplevelSurface> {
-    window
-        .underlying_surface()
-        .wayland()
-        .and_then(|surface| surface.toplevel())
-        .cloned()
+    window.toplevel().cloned()
 }
 
 /// Get the logical size of the primary output (fallback for global calculations).
@@ -116,7 +112,7 @@ pub fn output_size(state: &MitosGuiState) -> Size<i32, Logical> {
 /// Get the logical geometry (position and size) of the output containing the given window.
 fn output_geometry_for_window(state: &MitosGuiState, window: &Window) -> Rectangle<i32, Logical> {
     // Check which output the window is currently mapped to
-    if let Some(output) = state.space.outputs_for_element(window).next() {
+    if let Some(output) = state.space.outputs_for_element(window).iter().next() {
         if let Some(geom) = state.space.output_geometry(output) {
             return geom;
         }
@@ -140,7 +136,7 @@ pub fn usable_area_for_output(state: &MitosGuiState, output_geom: Rectangle<i32,
     // Notice we use output_geom.loc.x and loc.y so it respects the monitor's offset!
     Rectangle::new(
         (output_geom.loc.x, output_geom.loc.y + top).into(), 
-        (output_geom.size.w, height)
+        (output_geom.size.w, height).into()
     )
 }
 
@@ -150,7 +146,7 @@ pub fn usable_area(state: &MitosGuiState) -> Rectangle<i32, Logical> {
     let top = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
     let bottom = state.shell.dock.map(|p| p.size.1 + 20).unwrap_or(0);
     let height = (size.h - top - bottom).max(1);
-    Rectangle::new((0, top).into(), (size.w, height))
+    Rectangle::new((0, top).into(), (size.w, height).into())
 }
 
 fn current_geometry(
@@ -448,7 +444,7 @@ pub fn snap(state: &mut MitosGuiState, side: SnapSide) {
 
     state
         .space
-        .map_element(window, (x, area.loc.y).into(), true);
+        .map_element(window, (x, area.loc.y), true);
 }
 
 // ============================================================================

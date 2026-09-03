@@ -19,15 +19,15 @@ use calloop::EventLoop;
 use calloop::timer::{Timer, TimeoutAction};
 
 use nix::fcntl::OFlag;
-use nix::sys::stat::Mode;
 
 use smithay::backend::allocator::gbm::{
     GbmAllocator,
     GbmBufferFlags,
     GbmDevice,
 };
+use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::{
-    compositor::DrmCompositor,
+    compositor::{DrmCompositor, FrameFlags},
     DrmDevice,
     DrmDeviceFd,
     DrmEvent,
@@ -37,10 +37,10 @@ use smithay::backend::egl::{EGLContext, EGLDisplay};
 
 use smithay::backend::renderer::element::solid::SolidColorBuffer;
 use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::backend::renderer::Color32F;
+use smithay::backend::renderer::{Color32F, ImportDma, ImportMemWl};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::Session;
-use smithay::backend::libinput::LibinputInputBackend;
+use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 
 use smithay::reexports::drm::control::{
     connector,
@@ -55,10 +55,11 @@ use smithay::output::{
     Mode as SmithayMode,
     Output,
     PhysicalProperties,
+    Scale as OutputScale,
     Subpixel,
 };
 
-use smithay::utils::{Scale, Transform};
+use smithay::utils::{Buffer, Scale, Size, Transform};
 use smithay::reexports::wayland_server::{
     Display,
     ListeningSocket,
@@ -94,19 +95,19 @@ struct DrmOutputState {
 fn create_output(
     drm: &mut DrmDevice,
     renderer: &mut GlesRenderer,
-    fd: &DrmDeviceFd,
+    _fd: &DrmDeviceFd,
     gbm: &GbmDevice<DrmDeviceFd>,
     display_handle: &smithay::reexports::wayland_server::DisplayHandle,
     conn_handle: connector::Handle,
 ) -> Result<DrmOutputState, Box<dyn std::error::Error>> {
-    let conn_info = drm.connector_info(&conn_handle)?;
+    let conn_info = drm.get_connector(conn_handle, false)?;
     if conn_info.state() != connector::State::Connected {
         return Err("Not connected".into());
     }
 
     let mode = *conn_info.modes().first().ok_or("no modes")?;
     let crtc = conn_info.current_crtc()
-        .or_else(|| conn_info.encoders().iter().flat_map(|e| drm.encoder_info(e).ok()).find_map(|e| e.crtc()))
+        .or_else(|| conn_info.encoders().iter().flat_map(|e| drm.get_encoder(*e).ok()).find_map(|e| e.crtc()))
         .or_else(|| drm.resource_handles().ok()?.crtcs().first().copied())
         .ok_or("no crtc")?;
 
@@ -129,21 +130,25 @@ fn create_output(
     output.change_current_state(
         Some(out_mode), 
         Some(Transform::Normal), 
-        Some(Scale::Integer(1)), 
+        Some(OutputScale::Integer(1)), 
         Some((0, 0).into())
     );
     output.set_preferred(out_mode);
+
+    let color_formats = [Fourcc::Argb8888, Fourcc::Xrgb8888];
+    let renderer_formats: Vec<_> = renderer.dmabuf_formats().collect();
+    let cursor_size = Size::<u32, Buffer>::from((64, 64));
 
     let compositor = DrmCompositor::new(
         &output,
         surface,
         None,
-        GbmAllocator::new(fd.clone(), GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT),
-        GbmFramebufferExporter::new(gbm.clone()), // <-- CORRECT exporter
-        renderer.dmabuf_formats(),
-        None,
-        fd.clone(),
-        None,
+        GbmAllocator::new(gbm.clone(), GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT),
+        GbmFramebufferExporter::new(gbm.clone(), None), // <-- CORRECT exporter
+        color_formats,
+        renderer_formats,
+        cursor_size,
+        Some(gbm.clone()),
     )?;
 
     Ok(DrmOutputState { output, compositor })
@@ -154,7 +159,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut event_loop: EventLoop<MitosGuiState> = EventLoop::try_new()?;
     let (session, notify) = LibSeatSession::new()?;
-    event_loop.handle().insert_source(notify, |(), _, _| {})?;
+    event_loop.handle().insert_source(notify, |_event, _, _| {})?;
     println!("MITOS GUI: libseat session active");
 
     let mut display: Display<MitosGuiState> = Display::new()?;
@@ -163,8 +168,8 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let display_handle = display.handle();
 
     let node = pick_card().ok_or("no /dev/dri/cardN found")?;
-    let fd = session.open(Path::new(&node), OFlag::RDWR | OFlag::CLOEXEC, Mode::empty())?;
-    let fd = DrmDeviceFd::new(fd);
+    let fd = session.open(Path::new(&node), OFlag::O_RDWR | OFlag::O_CLOEXEC)?;
+    let fd = DrmDeviceFd::new(fd.into());
 
     let (drm, drm_event_source) = DrmDevice::new(fd.clone(), false)?;
     println!("MITOS GUI: DRM device opened on {node}");
@@ -173,7 +178,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     
     let gbm = GbmDevice::new(fd.clone())?;
     let egl_display = EGLDisplay::new(gbm.clone())?;
-    let egl_context = EGLContext::new(&egl_display, None)?;
+    let egl_context = EGLContext::new(&egl_display)?;
     let renderer = unsafe { GlesRenderer::new(egl_context)? };
     println!("MITOS GUI: GLES renderer on GBM/EGL (production)");
     
@@ -194,11 +199,20 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
 
     // VBlank handler
     {
+        let outputs_rc = outputs_rc.clone();
         event_loop.handle().insert_source(
             drm_event_source,
             move |event, _, state: &mut MitosGuiState| match event {
-                DrmEvent::VBlank(_) => {
+                DrmEvent::VBlank(_crtc) => {
                     state.drm_vblank = true;
+                    // Smithay requires frame_submitted() to be called after
+                    // each vblank, or the compositor's swapchain will
+                    // eventually run out of buffers.
+                    if let Ok(mut outputs) = outputs_rc.try_borrow_mut() {
+                        for drm_output in outputs.values_mut() {
+                            let _ = drm_output.compositor.frame_submitted();
+                        }
+                    }
                 }
                 DrmEvent::Error(err) => {
                     tracing::error!("MITOS GUI: DRM event error: {err:?}");
@@ -216,7 +230,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         let gbm = gbm.clone();
         let display_handle = display_handle.clone();
 
-        let hotplug_timer = Timer::new()?;
+        let hotplug_timer = Timer::from_duration(Duration::from_secs(2));
         event_loop.handle().insert_source(hotplug_timer, move |_, _, state: &mut MitosGuiState| {
             let mut drm = drm_rc.borrow_mut();
             let mut renderer = renderer_rc.borrow_mut();
@@ -228,7 +242,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                 let mut to_remove = Vec::new();
 
                 for conn in &current_conns {
-                    if let Ok(info) = drm.connector_info(conn) {
+                    if let Ok(info) = drm.get_connector(*conn, false) {
                         let is_connected = info.state() == connector::State::Connected;
                         let is_tracked = outputs.contains_key(conn);
 
@@ -262,7 +276,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Libinput initialization for Smithay 0.7
-    let mut context = Libinput::new_with_udev(session.clone());
+    let mut context = Libinput::new_with_udev(LibinputSessionInterface::from(session.clone()));
     context.udev_assign_seat("seat0").unwrap();
     let input_backend = LibinputInputBackend::new(context);
 
@@ -362,7 +376,9 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                 let output = &drm_output.output;
                 let compositor = &mut drm_output.compositor;
 
+                let output_name = output.name();
                 let scale = Scale::from(output.current_scale().fractional_scale());
+                let current_ws = state.current_workspace.get(&output_name).copied().unwrap_or(0);
                 
                 let shell_elements = crate::renderer::collect_shell_elements(
                     renderer, &state.shell, &state.shell.dock_layout,
@@ -370,17 +386,26 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                     &mut top_bar_glass, &mut launcher_glass, &mut dock_glass,
                     &top_bar_shadow, &top_bar_highlight, &top_bar_border,
                     &dock_shadow, &dock_highlight, &dock_border,
-                    &shell_text, &tray, scale,
+                    &shell_text, &tray, current_ws, crate::state::WORKSPACE_COUNT, scale,
                 );
 
-                let output_size = output.current_mode().map(|m| m.size).unwrap_or((800, 600).into());
+                // Logical (compositor-space) output size, mirroring the winit
+                // dev backend: prefer the Space's tracked geometry, falling
+                // back to converting the DRM mode's physical size.
+                let output_size = state.space.output_geometry(output)
+                    .map(|geometry| geometry.size)
+                    .unwrap_or_else(|| {
+                        let mode_size = output.current_mode().map(|m| m.size).unwrap_or((800, 600).into());
+                        mode_size.to_f64().to_logical(scale).to_i32_round()
+                    });
                 let top_bar_height = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
 
                 let elements = match crate::renderer::collect_frame_elements(
-                    renderer, &state.space, scale, &wallpaper, output_size, shell_elements, std::iter::empty(),
-                    &mut window_chrome, &state.popups, &state.notifications.active, top_bar_height,
-                    &state.auth, &state.auth, &state.osd, state.night_light,
-                    state.current_workspace, state.workspace_swipe_x, output_size.w,
+                    renderer, &state.space, scale, &wallpaper, output_size,
+                    &mut window_chrome, &state.popups, shell_elements, std::iter::empty(),
+                    &state.notifications.active, top_bar_height, &state.auth,
+                    current_ws, &output_name, state.workspace_swipe_x, output_size.w,
+                    &state.osd, state.night_light,
                 ) {
                     Ok(e) => e,
                     Err(err) => { tracing::warn!("MITOS GUI: frame build error: {err}"); continue; }
@@ -392,16 +417,15 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = crate::screenshot::take_screenshot(renderer, physical_size, &elements);
                 }
 
-                match compositor.render_frame(renderer, &elements, Color32F::new(0.0, 0.0, 0.0, 1.0)) {
+                match compositor.render_frame(renderer, &elements, Color32F::new(0.0, 0.0, 0.0, 1.0), FrameFlags::DEFAULT) {
                     Ok(frame) => {
-                        if frame.damage.is_some() {
-                            if compositor.queue_frame().is_ok() && !ready_sent {
+                        if !frame.is_empty {
+                            if compositor.queue_frame(()).is_ok() && !ready_sent {
                                 ready_sent = true;
                                 crate::notify::send_ready();
                             }
-                        } else {
-                            let _ = compositor.reset_frame();
                         }
+                        // Empty frame: nothing changed, nothing to queue.
                     }
                     Err(err) => tracing::warn!("MITOS GUI: render error: {err}"),
                 }

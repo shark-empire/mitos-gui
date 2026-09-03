@@ -13,7 +13,7 @@ use smithay::backend::renderer::element::memory::{
     MemoryRenderBufferRenderElement,
 };
 use smithay::backend::renderer::gles::{GlesError, GlesRenderer};
-use smithay::utils::{Logical, Rectangle, Size, Transform};
+use smithay::utils::{Buffer, Logical, Rectangle, Size, Transform};
 
 /// Font search order: MITOS font first, then common Linux paths.
 const FONT_PATHS: &[&str] = &[
@@ -78,7 +78,7 @@ impl TextRenderer {
             let gid = font.glyph_id(c);
 
             if let Some(p) = prev {
-                x += scaled.kerning(p, gid);
+                x += scaled.kern(p, gid);
             }
 
             glyphs.push((gid, x));
@@ -119,7 +119,7 @@ impl TextRenderer {
             let oy = bounds.min.y as i32;
 
             outline.draw(|px, py, cov| {
-                if cov == 0 {
+                if cov == 0.0 {
                     return;
                 }
 
@@ -165,14 +165,15 @@ impl TextTexture {
         }
 
         let size = Size::<i32, Logical>::new(w, h);
+        let buffer_size = Size::<i32, Buffer>::from((w, h));
 
         let buffer = MemoryRenderBuffer::from_slice(
             rgba.as_raw(),
             Fourcc::Abgr8888,
-            size,
+            buffer_size,
             1,
             Transform::Normal,
-            Some(vec![Rectangle::from_size(size)]),
+            Some(vec![Rectangle::from_size(buffer_size)]),
         );
 
         Some(Self { buffer, size })

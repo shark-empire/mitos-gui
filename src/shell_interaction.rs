@@ -127,9 +127,7 @@ pub fn update_running_state(state: &mut MitosGuiState) {
 /// Extract the XDG app-id from a window's toplevel surface.
 fn app_id_for_window(window: &Window) -> Option<String> {
     window
-        .underlying_surface()
-        .wayland()
-        .and_then(|s| s.toplevel())
+        .toplevel()
         .and_then(|t| t.current_state().app_id.clone())
 }
 

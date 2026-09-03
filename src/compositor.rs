@@ -66,8 +66,10 @@ impl XdgShellHandler for MitosGuiState {
 
         let window = Window::new_wayland_window(surface);
                 
-        // Assign to current workspace
-        crate::wm::meta(&window).workspace = self.current_workspace;
+        // Assign to the active output's current workspace
+        let active = self.active_output_name();
+        let ws = self.current_workspace.get(&active).copied().unwrap_or(0);
+        crate::wm::meta(&window).workspace.insert(active, ws);
         let position = next_window_position(&self.space);
 
         self.space.map_element(window.clone(), position, true);

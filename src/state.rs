@@ -63,6 +63,9 @@ impl OsdState {
     }
 }
 
+/// Fixed number of virtual desktops per monitor.
+pub const WORKSPACE_COUNT: usize = 4;
+
 // ============================================================================
 // MITOS SHELL
 // ============================================================================
@@ -152,7 +155,10 @@ pub struct MitosGuiState {
     pub seat: Seat<Self>,
 
     pub current_workspace: HashMap<String, usize>,
-    
+
+    /// Cross-workspace swipe-gesture offset, in units of one workspace width.
+    pub workspace_swipe_x: f64,
+
     // ------------------------------------------------------------------------
     // MITOS shell
     // ------------------------------------------------------------------------
@@ -248,8 +254,9 @@ impl MitosGuiState {
         }
 
         let mut shell = MitosShell::new();
-        let output_size = output
-            .current_mode()
+        let output_size = outputs
+            .first()
+            .and_then(|o| o.current_mode())
             .map(|mode| {
                 smithay::utils::Size::<i32, smithay::utils::Logical>::from((
                     mode.size.w,
@@ -281,8 +288,10 @@ impl MitosGuiState {
             shm_state,
             seat_state,
             seat,
+            current_workspace,
+            workspace_swipe_x: 0.0,
             shell,
-            output,
+            outputs,
             home_screen,
             space,
             popups: PopupManager::default(),
@@ -356,8 +365,9 @@ impl MitosGuiState {
         crate::theme::MitosTheme::apply_runtime(&self.home_screen);
 
         let output_size = self
-            .output
-            .current_mode()
+            .outputs
+            .first()
+            .and_then(|o| o.current_mode())
             .map(|mode| {
                 smithay::utils::Size::<i32, smithay::utils::Logical>::from((
                     mode.size.w,
@@ -400,7 +410,7 @@ pub fn remove_output(&mut self, output: &Output) {
         self.focused_window = None;
     } else if let Some(focused) = &self.focused_window {
         // Check if focused window is still on a valid output
-        let still_valid = self.space.outputs_for_element(focused).any(|o| o == output);
+        let still_valid = self.space.outputs_for_element(focused).iter().any(|o| o == output);
         if !still_valid {
             self.focused_window = None;
         }

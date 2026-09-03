@@ -107,11 +107,7 @@ pub fn handle_pointer_button<B: InputBackend>(
     let serial = SERIAL_COUNTER.next_serial();
     let button = event.button_code();
 
-    let button_state = match event.state() {
-        ButtonState::Pressed => ButtonState::Pressed,
-        ButtonState::Released => ButtonState::Released,
-        _ => return,
-    };
+    let button_state = event.state();
 
     let under = window_under_pointer(state);
 
@@ -197,19 +193,21 @@ pub fn handle_pointer_axis<B: InputBackend>(
 
     if let Some(value) = event.amount(Axis::Vertical) {
         frame = frame.value(Axis::Vertical, value);
-        
-        // Forward discrete scroll steps for legacy/mouse-wheel clients
-        if let Some(discrete) = event.discrete(Axis::Vertical) {
-            frame = frame.discrete(Axis::Vertical, discrete);
-        }
     }
 
     if let Some(value) = event.amount(Axis::Horizontal) {
         frame = frame.value(Axis::Horizontal, value);
-        
-        if let Some(discrete) = event.discrete(Axis::Horizontal) {
-            frame = frame.discrete(Axis::Horizontal, discrete);
-        }
+    }
+
+    // Forward high-resolution (v120) discrete scroll steps for
+    // legacy/mouse-wheel clients, when the backend reports them.
+    let v120_h = event.amount_v120(Axis::Horizontal);
+    let v120_v = event.amount_v120(Axis::Vertical);
+    if v120_h.is_some() || v120_v.is_some() {
+        frame.v120 = Some((
+            v120_h.unwrap_or(0.0) as i32,
+            v120_v.unwrap_or(0.0) as i32,
+        ));
     }
 
     pointer.axis(state, frame);
@@ -234,7 +232,7 @@ fn pointer_focus(state: &MitosGuiState)
     let (window, location) =
         state.space.element_under(state.pointer_location)?;
     let surface = window.wl_surface()?.into_owned();
-    Some((surface, location))
+    Some((surface, location.to_f64()))
 }
 
 /// Check if the pointer is over a dock icon and return its ID.
@@ -288,7 +286,7 @@ pub fn check_hot_corners(
     }
 
     let (x, y) = (pointer.x, pointer.y);
-    let (w, h) = (output_size.w as f64, output_size.h as f64);
+    let (w, _h) = (output_size.w as f64, output_size.h as f64);
     let threshold = 5.0; // 5 logical pixels from the edge
 
     // Top-Left: Open Launcher

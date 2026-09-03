@@ -25,9 +25,9 @@ pub fn process_input_event<B: InputBackend>(state: &mut MitosGuiState, output: &
         // winit's virtual device never produces these, and a real
         // source for them (libinput) doesn't exist until Stage 5.
                 // --- STAGE 5: TOUCHPAD GESTURES ---
-        InputEvent::SwipeGestureBegin { event } => gestures::handle_swipe_begin::<B>(state, event),
-        InputEvent::SwipeGestureUpdate { event } => gestures::handle_swipe_update::<B>(state, event),
-        InputEvent::SwipeGestureEnd { event } => gestures::handle_swipe_end::<B>(state, event),
+        InputEvent::GestureSwipeBegin { event } => gestures::handle_swipe_begin::<B>(state, event),
+        InputEvent::GestureSwipeUpdate { event } => gestures::handle_swipe_update::<B>(state, event),
+        InputEvent::GestureSwipeEnd { event } => gestures::handle_swipe_end::<B>(state, event),
         _ => {}
     }
 }

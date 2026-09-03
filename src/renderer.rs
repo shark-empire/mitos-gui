@@ -14,7 +14,7 @@
 //! Wayland itself does not provide the MITOS glass effect.
 //! The visual shell is deliberately implemented here
 
-mod renderer;
+pub mod frosted_glass;
 
 use smithay::{
     backend::{
@@ -30,17 +30,19 @@ use smithay::{
                 surface::WaylandSurfaceRenderElement,
                 AsRenderElements,
                 Kind,
+                RenderElement,
             },
             gles::{
                 element::PixelShaderElement,
                 GlesError,
                 GlesRenderer,
+                GlesTexture,
             },
             Color32F,
         },
     },
     desktop::{Space, Window},
-    utils::{Logical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
 use crate::desktop::HomeScreenConfig;
@@ -48,33 +50,39 @@ use crate::theme::MitosTheme;
 
 
 /// Captures the current scene (wallpaper + windows) into an offscreen texture.
-pub fn capture_background(
+///
+/// Reserved for the upcoming true frosted-glass blur pass (see
+/// `frosted_glass.rs`): it isn't wired into the render loop yet, but is
+/// kept compiling and ready to use once background-capture blur lands.
+pub fn capture_background<E>(
     renderer: &mut GlesRenderer,
     output_size: Size<i32, Physical>,
-    elements: &[impl Element<GlesRenderer>],
-) -> Result<GlesTexture, Box<dyn std::error::Error>> {
+    elements: &[E],
+) -> Result<GlesTexture, Box<dyn std::error::Error>>
+where
+    E: RenderElement<GlesRenderer>,
+{
     // 1. Create offscreen buffer
-    let mut bg_texture = renderer.create_buffer(Fourcc::Abgr8888, output_size)?;
+    let buffer_size = Size::<i32, smithay::utils::Buffer>::from((output_size.w, output_size.h));
+    let mut bg_texture = renderer.create_buffer(Fourcc::Abgr8888, buffer_size)?;
     let mut target = renderer.bind(&mut bg_texture)?;
-    
-    // 2. Render elements to the offscreen target
-    // We use a simple damage tracker or just render everything
+
+    // 2. Render elements to the offscreen target (force full damage via age=0)
     let mut tracker = smithay::backend::renderer::damage::OutputDamageTracker::new(
         output_size, 1.0, Transform::Normal
     );
-    
-    smithay::backend::renderer::damage::render_output(
+
+    tracker.render_output(
         renderer,
         &mut target,
-        &mut tracker,
         0,
-        [0.0, 0.0, 0.0, 1.0].into(), // Clear color
-        elements.iter(),
+        elements,
+        [0.0, 0.0, 0.0, 1.0],
     )?;
 
     // 3. Unbind
     drop(target);
-    
+
     Ok(bg_texture)
 }
 
@@ -1567,7 +1575,8 @@ pub fn collect_frame_elements(
     notifications: &[crate::notifications::Notification],
     top_bar_height: i32,
     auth: &crate::auth::AuthPrompt,
-    current_ws: usize,  
+    current_ws: usize,
+    output_name: &str,
     swipe_x: f64,
     output_width: i32,
     osd: &crate::state::OsdState,
@@ -1590,8 +1599,8 @@ pub fn collect_frame_elements(
     // 3. WAYLAND APPLICATION WINDOWS (Workspace Aware)
     // ------------------------------------------------------------
     for window in space.elements().rev() {
-        let win_ws = crate::wm::meta(window).workspace;
-        
+        let win_ws = crate::wm::meta(window).workspace.get(output_name).copied().unwrap_or(0);
+
         let diff = win_ws as i32 - current_ws as i32;
         if diff.abs() > 1 { continue; }
         

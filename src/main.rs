@@ -693,6 +693,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let render_result =
                 backend.bind().and_then(
                     |(renderer, mut framebuffer)| {
+                        // 1. Get the name of the monitor we are currently rendering for
+                        let output_name = output.name();
+
+                        // 2. Look up the active workspace for THIS monitor (fallback to 0)
+                        let current_ws = state.current_workspace.get(&output_name).copied().unwrap_or(0);
+
                         // ------------------------------------------------
                         // MITOS SHELL
                         // ------------------------------------------------
@@ -718,6 +724,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 &shell_text,
                                 &tray,
 
+                                current_ws,
+                                crate::state::WORKSPACE_COUNT,
+
                                 scale,
                             );
 
@@ -739,31 +748,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         let top_bar_height = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
 
-                        // 1. Get the name of the monitor we are currently rendering for
-                        let output_name = output.name();
-
-                        // 2. Look up the active workspace for THIS monitor (fallback to 0)
-                        let current_ws = state.current_workspace.get(&output_name).copied().unwrap_or(0);
-                        
                         let elements = renderer::collect_frame_elements(
                             renderer,
                             &state.space,
                             scale,
                             &wallpaper,
                             output_size,
-                            shell_elements,
-                            std::iter::empty(),
                             &mut window_chrome,
                             &state.popups,
+                            shell_elements,
+                            std::iter::empty(),
                             &state.notifications.active,
                             top_bar_height,
                             &state.auth,
-                            &state.auth,
-                            &state.osd,
-                            state.night_light,
-                            current_ws, // Pass the usize here
+                            current_ws,
+                            &output_name,
                             state.workspace_swipe_x,
                             output_size.w,
+                            &state.osd,
+                            state.night_light,
                         )?;
 
                         // ------------------------------------------------
