@@ -128,7 +128,7 @@ pub fn update_running_state(state: &mut MitosGuiState) {
 fn app_id_for_window(window: &Window) -> Option<String> {
     window
         .toplevel()
-        .and_then(|t| t.current_state().app_id.clone())
+        .and_then(|t| t.app_id().map(String::from))
 }
 
 /// Map an XDG app-id to a MITOS dock ID.
