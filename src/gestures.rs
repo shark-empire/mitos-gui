@@ -4,6 +4,7 @@
 use smithay::backend::input::{
     InputBackend,
     GestureBeginEvent,
+    GestureEventTrait,
     GestureSwipeUpdateEvent,
 };
 use crate::state::{MitosGuiState, WORKSPACE_COUNT};
