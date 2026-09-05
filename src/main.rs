@@ -22,6 +22,7 @@ mod session;
 mod gestures;
 mod screenshot;
 mod dbus;
+mod frosted_glass;
 
 use std::sync::Arc;
 use std::time::Duration;
