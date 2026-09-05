@@ -423,13 +423,15 @@ struct WallpaperElement(MemoryRenderBufferRenderElement<GlesRenderer>);
 // Update your macro:
 render_elements! {
     pub ChromeRenderElement<=GlesRenderer>;
-    Wallpaper=WallpaperElement, // Use the wrapper instead
-
-    Text=MemoryRenderBufferRenderElement<GlesRenderer>,
+    
+    // Combine both Text and Wallpaper into a single variant
+    Buffer=MemoryRenderBufferRenderElement<GlesRenderer>,
+    
     Glass=PixelShaderElement,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     SolidColor=SolidColorRenderElement,
 }
+
 
 
 // ============================================================================
