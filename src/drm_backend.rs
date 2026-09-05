@@ -161,7 +161,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI: production DRM backend starting (Multi-Monitor)");
 
     let mut event_loop: EventLoop<MitosGuiState> = EventLoop::try_new()?;
-    let (session, notify) = LibSeatSession::new()?;
+    let (mut session, notify) = LibSeatSession::new()?;
     event_loop.handle().insert_source(notify, |_event, _, _| {})?;
     println!("MITOS GUI: libseat session active");
 
