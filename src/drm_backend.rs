@@ -291,8 +291,8 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         event_loop.handle().insert_source(
             input_backend,
             move |event, _, state: &mut MitosGuiState| {
-                let output = outputs_rc.borrow().values().next().map(|s| s.output.clone());
-                if let Some(out) = output {
+                let outputs = outputs_rc.borrow().values().next().map(|s| s.output.clone());
+                if let Some(out) = outputs {
                     crate::input::process_input_event(state, &out, event);
                 }
             },
