@@ -3,7 +3,6 @@
 
 use smithay::backend::input::{
     GestureBeginEvent,
-    GestureSwipeEndEvent,
     GestureSwipeUpdateEvent,
     InputBackend,
 };
