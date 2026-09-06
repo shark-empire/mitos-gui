@@ -119,7 +119,6 @@ fn create_output(
 
     let output = Output::new(
         format!("MITOS-DRM-{}", u32::from(conn_handle))
-
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
