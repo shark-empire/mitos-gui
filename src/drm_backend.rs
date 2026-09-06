@@ -118,7 +118,7 @@ fn create_output(
     let surface = drm.create_surface(crtc, mode, &[conn_handle])?;
 
     let output = Output::new(
-        format!("MITOS-DRM-{}", u32::from(conn_handle)),
+        format!("MITOS-DRM-{}", conn_handle.into()),
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
@@ -342,6 +342,13 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let mut launcher_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
     let mut dock_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
 
+    // True frosted-glass (real background blur + tint) shader programs —
+    // one per shell component, mirroring the winit dev backend.
+    let panel_radius = crate::theme::MitosTheme::effective_panel_radius();
+    let mut top_bar_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
+    let mut launcher_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
+    let mut dock_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
+
     let top_bar_shadow = SolidColorBuffer::new((0, 0), crate::renderer::shadow_color());
     let top_bar_highlight = SolidColorBuffer::new((0, 0), crate::renderer::glass_highlight_color());
     let top_bar_border = SolidColorBuffer::new((0, 0), Color32F::new(0.0, 0.0, 0.0, 0.0));
@@ -389,15 +396,6 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                 let output_name = output.name();
                 let scale = Scale::from(output.current_scale().fractional_scale());
                 let current_ws = state.current_workspace.get(&output_name).copied().unwrap_or(0);
-                
-                let shell_elements = crate::renderer::collect_shell_elements(
-                    renderer, &state.shell, &state.shell.dock_layout,
-                    (state.pointer_location.x, state.pointer_location.y),
-                    &mut top_bar_glass, &mut launcher_glass, &mut dock_glass,
-                    &top_bar_shadow, &top_bar_highlight, &top_bar_border,
-                    &dock_shadow, &dock_highlight, &dock_border,
-                    &shell_text, &tray, current_ws, crate::state::WORKSPACE_COUNT, scale,
-                );
 
                 // Logical (compositor-space) output size, mirroring the winit
                 // dev backend: prefer the Space's tracked geometry, falling
@@ -408,6 +406,38 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                         let mode_size = output.current_mode().map(|m| m.size).unwrap_or((800, 600).into());
                         mode_size.to_f64().to_logical(scale).to_i32_round()
                     });
+
+                // ------------------------------------------------------
+                // TRUE FROSTED GLASS: capture wallpaper + windows to an
+                // offscreen texture before building the shell panels, so
+                // the top bar/launcher/dock can blur whatever's actually
+                // behind them this frame. Falls back to `None` (procedural
+                // glass shader) if the capture fails for any reason.
+                // ------------------------------------------------------
+                let bg_elements = match crate::renderer::collect_background_elements(
+                    renderer, &state.space, scale, &wallpaper, output_size,
+                    &mut window_chrome, current_ws, &output_name,
+                    state.workspace_swipe_x, output_size.w,
+                ) {
+                    Ok(e) => e,
+                    Err(err) => { tracing::warn!("MITOS GUI: background build error: {err}"); continue; }
+                };
+
+                let output_size_phys = output_size.to_f64().to_physical(scale).to_i32_round();
+                let bg_texture = crate::renderer::capture_background(
+                    renderer, output_size_phys, &bg_elements,
+                ).ok();
+
+                let shell_elements = crate::renderer::collect_shell_elements(
+                    renderer, &state.shell, &state.shell.dock_layout,
+                    (state.pointer_location.x, state.pointer_location.y),
+                    &mut top_bar_glass, &mut launcher_glass, &mut dock_glass,
+                    bg_texture.as_ref(), &top_bar_frost, &launcher_frost, &dock_frost,
+                    &top_bar_shadow, &top_bar_highlight, &top_bar_border,
+                    &dock_shadow, &dock_highlight, &dock_border,
+                    &shell_text, &tray, current_ws, crate::state::WORKSPACE_COUNT, scale,
+                );
+
                 let top_bar_height = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
 
                 let elements = match crate::renderer::collect_frame_elements(
