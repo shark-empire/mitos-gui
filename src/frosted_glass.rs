@@ -5,6 +5,7 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::element::{Element, RenderElement, Id};
 use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::Texture;
 use smithay::utils::{Buffer, Physical, Rectangle, Transform};
 
 /// The GLSL fragment shader for the frosted glass effect.
@@ -131,7 +132,7 @@ impl Element for FrostedGlassElement {
         // Map the physical geometry to the texture coordinates
         Rectangle::new(
             (self.geometry.loc.x as f64, self.geometry.loc.y as f64).into(),
-            self.geometry.size.to_f64(),
+            (self.geometry.size.w as f64, self.geometry.size.h as f64).into(),
         )
     }
 
