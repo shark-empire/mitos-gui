@@ -108,8 +108,10 @@ fn create_output(
     }
 
     let mode = *conn_info.modes().first().ok_or("no modes")?;
-    let crtc = conn_info.current_crtc()
-        .or_else(|| conn_info.encoders().iter().flat_map(|e| drm.get_encoder(*e).ok()).find_map(|e| e.crtc()))
+    // `connector::Info` has no `current_crtc()` method (that belongs to
+    // `encoder::Info`) — resolve the CRTC by walking the connector's
+    // encoders first, then fall back to any free CRTC.
+    let crtc = conn_info.encoders().iter().flat_map(|e| drm.get_encoder(*e).ok()).find_map(|e| e.crtc())
         .or_else(|| drm.resource_handles().ok()?.crtcs().first().copied())
         .ok_or("no crtc")?;
 
@@ -183,7 +185,9 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let drm_rc = Rc::new(RefCell::new(drm));
     
     let gbm = GbmDevice::new(fd.clone())?;
-    let egl_display = EGLDisplay::new(gbm.clone())?;
+    // SAFETY: `gbm` is a valid GBM device owned for the lifetime of the
+    // compositor, satisfying `EGLDisplay::new`'s requirements.
+    let egl_display = unsafe { EGLDisplay::new(gbm.clone())? };
     let egl_context = EGLContext::new(&egl_display)?;
     let renderer = unsafe { GlesRenderer::new(egl_context)? };
     println!("MITOS GUI: GLES renderer on GBM/EGL (production)");
@@ -329,7 +333,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         None,
     );
 
-    let mut wallpaper = crate::renderer::Wallpaper::load_default().map_err(|e| format!("MITOS GUI: {e}"))?;
+    let wallpaper = crate::renderer::Wallpaper::load_default().map_err(|e| format!("MITOS GUI: {e}"))?;
     let mut shell_text = crate::renderer::ShellTextState::new();
     let mut window_chrome = crate::renderer::WindowChrome::new();
     let mut tray = crate::renderer::TrayState::new();
@@ -338,12 +342,12 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let mut launcher_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
     let mut dock_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
 
-    let mut top_bar_shadow = SolidColorBuffer::new((0, 0), crate::renderer::shadow_color());
-    let mut top_bar_highlight = SolidColorBuffer::new((0, 0), crate::renderer::glass_highlight_color());
-    let mut top_bar_border = SolidColorBuffer::new((0, 0), Color32F::new(0.0, 0.0, 0.0, 0.0));
-    let mut dock_shadow = SolidColorBuffer::new((0, 0), crate::renderer::shadow_color());
-    let mut dock_highlight = SolidColorBuffer::new((0, 0), crate::renderer::glass_highlight_color());
-    let mut dock_border = SolidColorBuffer::new((0, 0), Color32F::new(0.0, 0.0, 0.0, 0.0));
+    let top_bar_shadow = SolidColorBuffer::new((0, 0), crate::renderer::shadow_color());
+    let top_bar_highlight = SolidColorBuffer::new((0, 0), crate::renderer::glass_highlight_color());
+    let top_bar_border = SolidColorBuffer::new((0, 0), Color32F::new(0.0, 0.0, 0.0, 0.0));
+    let dock_shadow = SolidColorBuffer::new((0, 0), crate::renderer::shadow_color());
+    let dock_highlight = SolidColorBuffer::new((0, 0), crate::renderer::glass_highlight_color());
+    let dock_border = SolidColorBuffer::new((0, 0), Color32F::new(0.0, 0.0, 0.0, 0.0));
 
     let mut full_redraw_frames: u8 = 4;
     let mut ready_sent = false;
