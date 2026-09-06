@@ -10,6 +10,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use smithay::desktop::Window;
+use smithay::wayland::compositor::with_states;
+use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 
 use crate::state::MitosGuiState;
 
@@ -126,9 +128,17 @@ pub fn update_running_state(state: &mut MitosGuiState) {
 
 /// Extract the XDG app-id from a window's toplevel surface.
 fn app_id_for_window(window: &Window) -> Option<String> {
-    window
-        .toplevel()
-        .and_then(|t| t.app_id().map(String::from))
+    let toplevel = window.toplevel()?;
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .app_id
+            .clone()
+    })
 }
 
 /// Map an XDG app-id to a MITOS dock ID.
