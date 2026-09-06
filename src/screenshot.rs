@@ -1,6 +1,6 @@
 //! Screen capture (Screenshots)
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::RenderElement; // Correct trait for Smithay 0.7
@@ -17,7 +17,7 @@ where
 {
     // 1. Create offscreen buffer
     let buffer_size = Size::<i32, Buffer>::from((output_size.w, output_size.h));
-    let mut texture = renderer.create_buffer(Fourcc::Abgr8888, buffer_size)?;
+    let mut texture: GlesTexture = renderer.create_buffer(Fourcc::Abgr8888, buffer_size)?;
     let mut target = renderer.bind(&mut texture)?;
     let mut tracker = OutputDamageTracker::new(output_size, 1.0, Transform::Normal);
     
