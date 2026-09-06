@@ -9,7 +9,13 @@ use smithay::backend::renderer::Texture;
 use smithay::utils::{Buffer, Physical, Rectangle, Transform};
 
 /// The GLSL fragment shader for the frosted glass effect.
-/// It performs a 9-tap Gaussian cross-blur and applies tint + highlights.
+/// It performs a 9-tap Gaussian cross-blur and applies tint + highlights,
+/// then clips the result to a rounded "Liquid Glass" silhouette so it
+/// matches the rest of the MITOS shell's rounded panels.
+///
+/// `__RADIUS__` is substituted with the theme's panel radius (a plain
+/// string replace, not `format!`, so the GLSL braces below don't need
+/// escaping) before compilation.
 const FROSTED_GLASS_SHADER: &str = r#"
 //_DEFINES
 precision mediump float;
@@ -18,8 +24,16 @@ uniform sampler2D tex;
 uniform float alpha;
 uniform float tint; // Smithay passes this (0.0 or 1.0), we use our own color
 uniform vec2 u_tex_size;
+uniform vec2 u_size;
 uniform vec4 u_tint_color;
 uniform vec4 u_border_color;
+
+const float RADIUS = __RADIUS__;
+
+float sd_round_box(vec2 p, vec2 half_size, float r) {
+    vec2 q = abs(p) - half_size + vec2(r);
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
 
 void main() {
     vec2 texel = 1.0 / u_tex_size;
@@ -73,16 +87,32 @@ void main() {
     float border = step(0.99, v_coords.y) * u_border_color.a;
     colored = mix(colored, u_border_color, border * 0.5);
 
-    gl_FragColor = colored * alpha;
+    // Rounded "Liquid Glass" silhouette: clip the whole panel (blur +
+    // tint + highlight + border) to a rounded-rect mask so it matches
+    // the rest of the MITOS shell instead of drawing square corners.
+    vec2 p = v_coords * u_size;
+    vec2 half_size = u_size * 0.5;
+    float d = sd_round_box(p - half_size, half_size, RADIUS);
+    float mask = 1.0 - smoothstep(-1.0, 1.0, d);
+
+    gl_FragColor = colored * alpha * mask;
 }
 "#;
 
 /// Compiles the frosted glass shader program.
-pub fn compile_frosted_program(renderer: &mut GlesRenderer) -> Result<GlesTexProgram, GlesError> {
+///
+/// `radius` should match the theme's panel radius
+/// ([`crate::theme::MitosTheme::effective_panel_radius`]) so the true-blur
+/// panels line up visually with the procedural liquid-glass panels
+/// (`renderer::create_glass_panel_element`) they can fall back to.
+pub fn compile_frosted_program(renderer: &mut GlesRenderer, radius: f32) -> Result<GlesTexProgram, GlesError> {
+    let shader = FROSTED_GLASS_SHADER.replace("__RADIUS__", &format!("{radius:.8}"));
+
     renderer.compile_custom_texture_shader(
-        FROSTED_GLASS_SHADER,
+        shader,
         &[
             smithay::backend::renderer::gles::UniformName::new("u_tex_size", smithay::backend::renderer::gles::UniformType::_2f),
+            smithay::backend::renderer::gles::UniformName::new("u_size", smithay::backend::renderer::gles::UniformType::_2f),
             smithay::backend::renderer::gles::UniformName::new("u_tint_color", smithay::backend::renderer::gles::UniformType::_4f),
             smithay::backend::renderer::gles::UniformName::new("u_border_color", smithay::backend::renderer::gles::UniformType::_4f),
         ],
@@ -155,6 +185,7 @@ impl RenderElement<GlesRenderer> for FrostedGlassElement {
         
         let uniforms = vec![
             Uniform::new("u_tex_size", UniformValue::_2f(tex_size.w as f32, tex_size.h as f32)),
+            Uniform::new("u_size", UniformValue::_2f(self.geometry.size.w as f32, self.geometry.size.h as f32)),
             Uniform::new("u_tint_color", UniformValue::_4f(self.tint[0], self.tint[1], self.tint[2], self.tint[3])),
             Uniform::new("u_border_color", UniformValue::_4f(self.border[0], self.border[1], self.border[2], self.border[3])),
         ];
