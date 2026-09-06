@@ -400,6 +400,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         renderer::create_glass_panel_element(
             backend.renderer()
         )?;
+
+    // True frosted-glass (real background blur + tint) shader programs —
+    // one per shell component, mirroring the procedural glass shaders
+    // above. Each panel falls back to its procedural `*_glass` shader on
+    // any frame where a background capture isn't available yet.
+    let panel_radius = theme::MitosTheme::effective_panel_radius();
+
+    let mut top_bar_frost =
+        frosted_glass::compile_frosted_program(backend.renderer(), panel_radius)?;
+
+    let mut launcher_frost =
+        frosted_glass::compile_frosted_program(backend.renderer(), panel_radius)?;
+
+    let mut dock_frost =
+        frosted_glass::compile_frosted_program(backend.renderer(), panel_radius)?;
+
     let mut shell_text = renderer::ShellTextState::new();
     
     let mut tray = renderer::TrayState::new();
@@ -547,6 +563,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 renderer::create_glass_panel_element(backend.renderer())
             {
                 dock_glass = glass;
+            }
+
+            // Recompile the frosted-glass shaders too, in case the
+            // theme's panel radius changed.
+            let panel_radius = theme::MitosTheme::effective_panel_radius();
+            if let Ok(frost) =
+                frosted_glass::compile_frosted_program(backend.renderer(), panel_radius)
+            {
+                top_bar_frost = frost;
+            }
+            if let Ok(frost) =
+                frosted_glass::compile_frosted_program(backend.renderer(), panel_radius)
+            {
+                launcher_frost = frost;
+            }
+            if let Ok(frost) =
+                frosted_glass::compile_frosted_program(backend.renderer(), panel_radius)
+            {
+                dock_frost = frost;
             }
 
             // Swap wallpaper if home.conf points to a new one.
@@ -701,6 +736,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let current_ws = state.current_workspace.get(&output_name).copied().unwrap_or(0);
 
                         // ------------------------------------------------
+                        // OUTPUT SIZE (needed before the shell, for the
+                        // background capture below)
+                        // ------------------------------------------------
+                        let output_size =
+                            state
+                                .space
+                                .output_geometry(&output)
+                                .map(|geometry| geometry.size)
+                                .unwrap_or_else(|| {
+                                    mode.size
+                                        .to_f64()
+                                        .to_logical(scale)
+                                        .to_i32_round()
+                                });
+
+                        // ------------------------------------------------
+                        // TRUE FROSTED GLASS: capture wallpaper + windows
+                        // to an offscreen texture *before* the shell panels
+                        // are built, so the top bar/launcher/dock can blur
+                        // whatever's actually behind them this frame.
+                        // Falls back to `None` (procedural glass shader)
+                        // if the capture fails for any reason.
+                        // ------------------------------------------------
+                        let bg_elements = renderer::collect_background_elements(
+                            renderer,
+                            &state.space,
+                            scale,
+                            &wallpaper,
+                            output_size,
+                            &mut window_chrome,
+                            current_ws,
+                            &output_name,
+                            state.workspace_swipe_x,
+                            output_size.w,
+                        )?;
+
+                        let output_size_phys = output_size.to_f64().to_physical(scale).to_i32_round();
+                        let bg_texture = renderer::capture_background(
+                            renderer, output_size_phys, &bg_elements,
+                        ).ok();
+
+                        // ------------------------------------------------
                         // MITOS SHELL
                         // ------------------------------------------------
                         let shell_elements =
@@ -713,6 +790,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 &mut top_bar_glass,
                                 &mut launcher_glass,
                                 &mut dock_glass,
+
+                                bg_texture.as_ref(),
+                                &top_bar_frost,
+                                &launcher_frost,
+                                &dock_frost,
 
                                 &top_bar_shadow_buffer,
                                 &top_bar_highlight_buffer,
@@ -735,18 +817,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // ------------------------------------------------
                         // SHELL + CLIENT WINDOWS
                         // ------------------------------------------------
-                        let output_size =
-                            state
-                                .space
-                                .output_geometry(&output)
-                                .map(|geometry| geometry.size)
-                                .unwrap_or_else(|| {
-                                    mode.size
-                                        .to_f64()
-                                        .to_logical(scale)
-                                        .to_i32_round()
-                                });
-
                         let top_bar_height = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
 
                         let elements = renderer::collect_frame_elements(
