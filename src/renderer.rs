@@ -39,6 +39,7 @@ use smithay::{
                 element::PixelShaderElement,
                 GlesError,
                 GlesRenderer,
+                GlesTexProgram,
                 GlesTexture,
             },
             Color32F,
@@ -425,6 +426,7 @@ render_elements! {
     Buffer=MemoryRenderBufferRenderElement<GlesRenderer>,
     
     Glass=PixelShaderElement,
+    Frosted=crate::frosted_glass::FrostedGlassElement,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     SolidColor=SolidColorRenderElement,
 }
@@ -635,6 +637,7 @@ void main() {{
 fn collect_glass_panel_elements(
     panel: &GlassPanel,
     glass_panel: &mut PixelShaderElement,
+    bg: Option<(&GlesTexture, &GlesTexProgram)>,
     shadow_buffer: &SolidColorBuffer,
     highlight_buffer: &SolidColorBuffer,
     border_buffer: &SolidColorBuffer,
@@ -651,22 +654,46 @@ fn collect_glass_panel_elements(
     }
 
     // ------------------------------------------------------------
-    // Rounded glass body
+    // Glass body: true frosted (real background blur + tint) when a
+    // background capture is available this frame, falling back to the
+    // procedural liquid-glass shader otherwise (e.g. the very first
+    // frame, before anything has been captured yet).
     // ------------------------------------------------------------
 
-    glass_panel.resize(
-        Rectangle::new(
-            (x, y).into(),
-            (width, height).into(),
-        ),
-        None,
-    );
+    if let Some((bg_texture, frost_program)) = bg {
+        let phys_loc = Point::<i32, Logical>::from((x, y))
+            .to_f64()
+            .to_physical(scale)
+            .to_i32_round();
+        let phys_size = Size::<i32, Logical>::from((width, height))
+            .to_f64()
+            .to_physical(scale)
+            .to_i32_round();
 
-    elements.push(
-        ChromeRenderElement::Glass(
-            glass_panel.clone(),
-        ),
-    );
+        elements.push(ChromeRenderElement::Frosted(
+            crate::frosted_glass::FrostedGlassElement::new(
+                Rectangle::new(phys_loc, phys_size),
+                bg_texture.clone(),
+                frost_program.clone(),
+                panel.tint.components(),
+                panel.border.components(),
+            ),
+        ));
+    } else {
+        glass_panel.resize(
+            Rectangle::new(
+                (x, y).into(),
+                (width, height).into(),
+            ),
+            None,
+        );
+
+        elements.push(
+            ChromeRenderElement::Glass(
+                glass_panel.clone(),
+            ),
+        );
+    }
 
     // ------------------------------------------------------------
     // Shadow
@@ -717,6 +744,7 @@ fn collect_glass_panel_elements(
 pub fn collect_top_bar_elements(
     panel: &GlassPanel,
     glass_panel: &mut PixelShaderElement,
+    bg: Option<(&GlesTexture, &GlesTexProgram)>,
     shadow_buffer: &SolidColorBuffer,
     highlight_buffer: &SolidColorBuffer,
     border_buffer: &SolidColorBuffer,
@@ -726,6 +754,7 @@ pub fn collect_top_bar_elements(
     collect_glass_panel_elements(
         panel,
         glass_panel,
+        bg,
         shadow_buffer,
         highlight_buffer,
         border_buffer,
@@ -741,6 +770,7 @@ pub fn collect_top_bar_elements(
 pub fn collect_launcher_elements(
     panel: &GlassPanel,
     glass_panel: &mut PixelShaderElement,
+    bg: Option<(&GlesTexture, &GlesTexProgram)>,
     shadow_buffer: &SolidColorBuffer,
     highlight_buffer: &SolidColorBuffer,
     border_buffer: &SolidColorBuffer,
@@ -750,6 +780,7 @@ pub fn collect_launcher_elements(
     collect_glass_panel_elements(
         panel,
         glass_panel,
+        bg,
         shadow_buffer,
         highlight_buffer,
         border_buffer,
@@ -762,6 +793,7 @@ pub fn collect_dock_elements(
     panel: &GlassPanel,
     layout: &crate::desktop::DockLayout,
     glass_panel: &mut PixelShaderElement,
+    bg: Option<(&GlesTexture, &GlesTexProgram)>,
     shadow_buffer: &SolidColorBuffer,
     highlight_buffer: &SolidColorBuffer,
     border_buffer: &SolidColorBuffer,
@@ -770,7 +802,7 @@ pub fn collect_dock_elements(
     pointer_x: f64,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = collect_glass_panel_elements(
-        panel, glass_panel, shadow_buffer, highlight_buffer,
+        panel, glass_panel, bg, shadow_buffer, highlight_buffer,
         border_buffer, renderer, scale,
     );
 
@@ -1080,6 +1112,16 @@ pub fn collect_shell_elements(
     launcher_glass: &mut PixelShaderElement,
     dock_glass: &mut PixelShaderElement,
 
+    // True frosted-glass background capture + each panel's compiled
+    // frosted-glass shader program. `bg_texture` is `None` on frames
+    // where a capture wasn't available (e.g. the very first frame),
+    // in which case every panel below falls back to the procedural
+    // liquid-glass shader instead.
+    bg_texture: Option<&GlesTexture>,
+    top_bar_frost: &GlesTexProgram,
+    launcher_frost: &GlesTexProgram,
+    dock_frost: &GlesTexProgram,
+
     top_bar_shadow: &SolidColorBuffer,
     top_bar_highlight: &SolidColorBuffer,
     top_bar_border: &SolidColorBuffer,
@@ -1103,6 +1145,7 @@ pub fn collect_shell_elements(
     if let Some(panel) = shell.top_bar.as_ref() {
         elements.extend(collect_top_bar_elements(
             panel, top_bar_glass,
+            bg_texture.map(|t| (t, top_bar_frost)),
             top_bar_shadow, top_bar_highlight, top_bar_border,
             renderer, scale,
         ));
@@ -1165,6 +1208,7 @@ pub fn collect_shell_elements(
         if let Some(panel) = shell.launcher.as_ref() {
             elements.extend(collect_launcher_elements(
                 panel, launcher_glass,
+                bg_texture.map(|t| (t, launcher_frost)),
                 top_bar_shadow, top_bar_highlight, top_bar_border,
                 renderer, scale,
             ));
@@ -1221,6 +1265,7 @@ pub fn collect_shell_elements(
     if let Some(panel) = shell.dock.as_ref() {
         elements.extend(collect_dock_elements(
             panel, dock_layout, dock_glass,
+            bg_texture.map(|t| (t, dock_frost)),
             dock_shadow, dock_highlight, dock_border,
             renderer, scale, pointer.0,
         ));
@@ -1569,6 +1614,56 @@ pub fn collect_night_light_elements(
 // ============================================================================
 // MASTER FRAME COMPOSITION
 // ============================================================================
+
+/// Collect just the desktop background — wallpaper + application windows,
+/// with no shell chrome, notifications, or overlays.
+///
+/// This is the same content [`collect_frame_elements`] draws as its own
+/// first two steps, but exposed standalone so the caller can render it to
+/// an offscreen texture via [`capture_background`] *before* building the
+/// shell panels, giving [`collect_shell_elements`] something real to blur
+/// for the true frosted-glass effect (see `frosted_glass.rs`). Called a
+/// second time inside `collect_frame_elements` itself for the actual
+/// on-screen frame — cheap to recompute (no GPU work, just element
+/// descriptors) and keeps that function's signature unchanged.
+pub fn collect_background_elements(
+    renderer: &mut GlesRenderer,
+    space: &Space<Window>,
+    scale: Scale<f64>,
+    wallpaper: &Wallpaper,
+    output_size: Size<i32, Logical>,
+    window_chrome: &mut WindowChrome,
+    current_ws: usize,
+    output_name: &str,
+    swipe_x: f64,
+    output_width: i32,
+) -> Result<Vec<ChromeRenderElement>, GlesError> {
+    let mut elements = Vec::new();
+
+    let wallpaper_element = wallpaper.render_element(renderer, output_size)?;
+    elements.push(ChromeRenderElement::Buffer(wallpaper_element));
+
+    for window in space.elements().rev() {
+        let win_ws = crate::wm::meta(window).workspace.get(output_name).copied().unwrap_or(0);
+
+        let diff = win_ws as i32 - current_ws as i32;
+        if diff.abs() > 1 { continue; }
+
+        let Some(location) = space.element_location(window) else { continue; };
+
+        let offset_x = (diff as f64 * output_width as f64) + (swipe_x * output_width as f64);
+        let final_loc = Point::from((location.x as f64 + offset_x, location.y as f64));
+
+        elements.extend(collect_window_chrome_elements(
+            renderer, window, final_loc.to_i32_round(), scale, window_chrome,
+        ));
+
+        let physical_location = final_loc.to_physical(scale).to_i32_round();
+        elements.extend(window.render_elements(renderer, physical_location, scale, 1.0));
+    }
+
+    Ok(elements)
+}
 
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
