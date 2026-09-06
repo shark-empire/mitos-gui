@@ -45,7 +45,7 @@ use smithay::{
         },
     },
     desktop::{Space, Window},
-    utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
 use crate::desktop::HomeScreenConfig;
@@ -416,9 +416,6 @@ pub fn clear_color(
 // ============================================================================
 // RENDER ELEMENT TYPES
 // ============================================================================
-
-#[derive(Debug, Clone)]
-struct WallpaperElement(MemoryRenderBufferRenderElement<GlesRenderer>);
 
 // Update your macro:
 render_elements! {
@@ -1035,7 +1032,7 @@ impl TrayState {
 
         if bk != self.bat_key {
             self.bat_key = bk;
-            self.bat_tex = battery.map(|b| {
+            self.bat_tex = battery.and_then(|b| {
                 crate::text::TextTexture::from_rgba(
                     crate::icons::battery_icon(b.capacity, b.charging, TRAY_COLOR),
                 )
@@ -1115,7 +1112,7 @@ pub fn collect_shell_elements(
             let y = panel.position.1 + (panel.size.1 - clock.size.h) / 2;
 
             if let Ok(el) = clock.element(renderer, (x, y)) {
-                elements.push(ChromeRenderElement::Text(el));
+                elements.push(ChromeRenderElement::Buffer(el));
             }
         }
       // Tray icons, left of the clock
@@ -1135,7 +1132,7 @@ pub fn collect_shell_elements(
             .flatten()
         {
             if let Ok(el) = tex.element(renderer, (x, cy - tex.size.h / 2)) {
-                elements.push(ChromeRenderElement::Text(el));
+                elements.push(ChromeRenderElement::Buffer(el));
             }
 
             x += tex.size.w + 10;
@@ -1150,7 +1147,8 @@ pub fn collect_shell_elements(
 
         for i in 0..workspace_count {
             let color = if i == current_workspace {
-                crate::theme::MitosTheme::effective_accent()
+                let c = crate::theme::MitosTheme::effective_accent();
+                Color32F::new(c.r, c.g, c.b, c.a)
             } else {
                 Color32F::new(1.0, 1.0, 1.0, 0.3)
             };
@@ -1177,7 +1175,7 @@ pub fn collect_shell_elements(
             // Search query
             if let Some(q) = text.query_texture.as_ref() {
                 if let Ok(el) = q.element(renderer, (px + 24, py + 22)) {
-                    elements.push(ChromeRenderElement::Text(el));
+                    elements.push(ChromeRenderElement::Buffer(el));
                 }
             }
 
@@ -1210,7 +1208,7 @@ pub fn collect_shell_elements(
 
                 if let Some(t) = tex {
                     if let Ok(el) = t.element(renderer, (px + 24, row_y + 6)) {
-                        elements.push(ChromeRenderElement::Text(el));
+                        elements.push(ChromeRenderElement::Buffer(el));
                     }
                 }
             }
@@ -1303,14 +1301,15 @@ impl WindowChrome {
 
         let img = generate_shadow_image(sw, sh, 16.0, 8.0, (0, 0, 0, 180));
         let size = Size::<i32, Logical>::new(sw, sh);
-        
+        let buffer_size = Size::<i32, Buffer>::from((sw, sh));
+
         let buffer = MemoryRenderBuffer::from_slice(
             img.as_raw(),
             Fourcc::Abgr8888,
-            size,
+            buffer_size,
             1,
             Transform::Normal,
-            Some(vec![Rectangle::from_size(size)]),
+            Some(vec![Rectangle::from_size(buffer_size)]),
         );
 
         self.shadow_buffer = Some(buffer);
@@ -1344,7 +1343,7 @@ pub fn collect_window_chrome_elements(
             None,
             Kind::Unspecified,
         ) {
-            elements.push(ChromeRenderElement::Wallpaper(el)); // Reusing Wallpaper variant for Memory buffers
+            elements.push(ChromeRenderElement::Buffer(el));
         }
     }
 
@@ -1414,13 +1413,13 @@ pub fn collect_notification_elements(
 
         if let Some(tex) = &notif.title_tex {
             if let Ok(el) = tex.element(renderer, (start_x + 16, current_y + 16)) {
-                elements.push(ChromeRenderElement::Text(el));
+                elements.push(ChromeRenderElement::Buffer(el));
             }
         }
 
         if let Some(tex) = &notif.body_tex {
             if let Ok(el) = tex.element(renderer, (start_x + 16, current_y + 40)) {
-                elements.push(ChromeRenderElement::Text(el));
+                elements.push(ChromeRenderElement::Buffer(el));
             }
         }
 
@@ -1578,7 +1577,7 @@ pub fn collect_frame_elements(
     wallpaper: &Wallpaper,
     output_size: Size<i32, Logical>,
     window_chrome: &mut WindowChrome,
-    popups: &smithay::desktop::PopupManager,
+    _popups: &smithay::desktop::PopupManager,
     shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
     overlay_elements: impl IntoIterator<Item = ChromeRenderElement>,
     notifications: &[crate::notifications::Notification],
@@ -1596,10 +1595,9 @@ pub fn collect_frame_elements(
     // ------------------------------------------------------------
     // 1. WALLPAPER
     // ------------------------------------------------------------
-    let buffer_size = output_size.to_physical(scale).to_buffer(1, smithay::utils::Transform::Normal);
-    let wallpaper_element = wallpaper.render_element(renderer, buffer_size)?;
+    let wallpaper_element = wallpaper.render_element(renderer, output_size)?;
 
-    elements.push(ChromeRenderElement::Wallpaper(wallpaper_element));
+    elements.push(ChromeRenderElement::Buffer(wallpaper_element));
 
     // ------------------------------------------------------------
     // 2. MITOS SHELL (Dock + top bar)
@@ -1631,10 +1629,12 @@ pub fn collect_frame_elements(
     // ------------------------------------------------------------
     // 4. XDG POPUPS (Menus, Tooltips)
     // ------------------------------------------------------------
-    for (popup, location) in popups.tracked_popups() {
-    let physical_loc = location.to_physical(scale).to_i32_round();
-    elements.extend(popup.render_elements(renderer, physical_loc, scale, 1.0));
-      }
+    // Note: smithay 0.7's `PopupManager` has no API to iterate every
+    // tracked popup directly (only `popups_for_surface(surface)` for a
+    // specific surface). Popups belonging to each mapped window are
+    // already included above via `Window::render_elements`, which walks
+    // that window's popup tree internally, so no separate pass is needed
+    // here.
 
 
     // ------------------------------------------------------------
