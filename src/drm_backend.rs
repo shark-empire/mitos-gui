@@ -118,7 +118,7 @@ fn create_output(
     let surface = drm.create_surface(crtc, mode, &[conn_handle])?;
 
     let output = Output::new(
-        format!("MITOS-DRM-{}", conn_handle.into()),
+        format!("MITOS-DRM-{}", u32::from(conn_handle)),
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
@@ -346,9 +346,10 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     // True frosted-glass (real background blur + tint) shader programs —
     // one per shell component, mirroring the winit dev backend.
     let panel_radius = crate::theme::MitosTheme::effective_panel_radius();
-    let mut top_bar_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
-    let mut launcher_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
-    let mut dock_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
+    let top_bar_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
+    let launcher_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
+    let dock_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
+
 
     let top_bar_shadow = SolidColorBuffer::new((0, 0), crate::renderer::shadow_color());
     let top_bar_highlight = SolidColorBuffer::new((0, 0), crate::renderer::glass_highlight_color());
