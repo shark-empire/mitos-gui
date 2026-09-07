@@ -346,10 +346,14 @@ fn handle_auth_input(
     match keysym {
         keysyms::KEY_Escape => {
             state.auth.cancel();
-            state.notifications.push("MITOS Security", "Authentication cancelled", "");
+            if !state.auth.is_lock_screen {
+                state.notifications.push("MITOS Security", "Authentication cancelled", "");
+            }
         }
         keysyms::KEY_Return => {
-            if state.auth.submit() {
+            if state.auth.is_lock_screen {
+                submit_lock_screen(state);
+            } else if state.auth.submit() {
                 state.notifications.push("MITOS Security", "Authentication successful", "Privileges granted.");
             } else {
                 state.notifications.push("MITOS Security", "Authentication failed", "Incorrect password.");
@@ -369,4 +373,29 @@ fn handle_auth_input(
 
     state.pending_full_redraw = true;
     FilterResult::Intercept(())
+}
+
+/// Send the typed password to mitos-session as a real `Unlock`
+/// request instead of checking it locally -- mitos-session is the
+/// only side that ever decides whether a lock-screen password is
+/// correct (see `docs/security.md` in that project).
+fn submit_lock_screen(state: &mut MitosGuiState) {
+    if state.auth.pending {
+        return;
+    }
+
+    let Some(ipc) = state.session_ipc.as_mut() else {
+        // No connection to mitos-session at all (e.g. running mitos-gui
+        // standalone for development) -- nothing to check the password
+        // against, so don't pretend either way.
+        state.auth.error_msg = Some("Not connected to mitos-session".to_string());
+        return;
+    };
+
+    let session_id = ipc.session_id;
+    let user_name = std::env::var("USER").unwrap_or_default();
+    let password = std::mem::take(&mut state.auth.password);
+
+    state.auth.pending = true;
+    ipc.send(&mitos_session::ipc::Request::Unlock { session_id, user_name, password });
 }
