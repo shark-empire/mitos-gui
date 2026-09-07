@@ -220,6 +220,12 @@ pub struct MitosGuiState {
     pub pending_screenshot: bool,
     pub dbus_service: Option<crate::dbus::DbusService>,
 
+    /// Connection to mitos-session for lock-screen/session IPC. `None`
+    /// when mitos-gui isn't running under a real mitos-session-managed
+    /// session (e.g. launched by hand for development) -- lock-screen
+    /// support is simply unavailable in that case.
+    pub session_ipc: Option<crate::session_ipc::SessionIpc>,
+
 }
 
 impl MitosGuiState {
@@ -233,7 +239,7 @@ impl MitosGuiState {
         outputs: Vec<Output>,
         home_screen: HomeScreenConfig,
         dbus_service: crate::dbus::DbusService, // Added
-        _unused: Option<()>,
+        session_ipc: Option<crate::session_ipc::SessionIpc>,
     ) -> Self {
         // ------------------------------------------------------------
         // Desktop space
@@ -320,6 +326,7 @@ impl MitosGuiState {
 
             pending_screenshot: false,
             dbus_service: Some(dbus_service),
+            session_ipc,
         }
     }
 
@@ -424,6 +431,56 @@ pub fn remove_output(&mut self, output: &Output) {
                 self.notifications.push(&app_name, &title, &body);
                 self.pending_full_redraw = true;
             }
+        }
+    }
+
+    /// Drain events/replies from mitos-session and drive the lock
+    /// screen accordingly. mitos-gui never decides on its own to lock
+    /// or unlock anything -- it only ever reacts to what arrives here.
+    pub fn poll_session_ipc(&mut self) {
+        use mitos_session::ipc::{Event as SessionEvent, Message, Response};
+        use mitos_session::authentication::AuthOutcome;
+        use mitos_session::lock::LockReason;
+
+        let Some(ipc) = self.session_ipc.as_ref() else { return };
+
+        while let Ok(msg) = ipc.rx.try_recv() {
+            match msg {
+                Message::Event(SessionEvent::ShowLockScreen { reason, .. }) => {
+                    let message = match reason {
+                        LockReason::Manual => "Locked",
+                        LockReason::Idle => "Locked (idle)",
+                        LockReason::Suspend => "Locked (suspended)",
+                    };
+                    self.auth.lock(message);
+                }
+                Message::Event(SessionEvent::HideLockScreen { .. }) => {
+                    self.auth.hide();
+                }
+                Message::Event(SessionEvent::AuthFeedback { outcome, .. }) => {
+                    self.auth.pending = false;
+                    match outcome {
+                        AuthOutcome::Success => self.auth.error_msg = None,
+                        AuthOutcome::Failure { attempts_remaining } => {
+                            self.auth.error_msg = Some(format!("Incorrect password ({attempts_remaining} attempts left)"));
+                        }
+                        AuthOutcome::LockedOut { retry_after_secs } => {
+                            self.auth.error_msg = Some(format!("Too many attempts -- try again in {retry_after_secs}s"));
+                        }
+                        AuthOutcome::Error(msg) => self.auth.error_msg = Some(msg),
+                    }
+                }
+                Message::Response(resp @ Response::Session(_)) => {
+                    // Reply to the startup `SessionStatus` query: pick
+                    // up an already-locked session (e.g. mitos-gui
+                    // restarted after a crash while locked).
+                    if crate::session_ipc::session_locked(&resp) == Some(true) && !self.auth.active {
+                        self.auth.lock("Locked");
+                    }
+                }
+                _ => {}
+            }
+            self.pending_full_redraw = true;
         }
     }
 
