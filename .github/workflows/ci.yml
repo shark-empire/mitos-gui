@@ -25,7 +25,9 @@ jobs:
             libinput-dev \
             libseat-dev \
             libgbm-dev \
+            clang \
             libdrm-dev \
+            libclang-dev \
             libegl1-mesa-dev \
             libgl1-mesa-dev \
             libpixman-1-dev \
