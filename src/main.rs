@@ -23,6 +23,7 @@ mod gestures;
 mod screenshot;
 mod dbus;
 mod frosted_glass;
+mod session_ipc;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -278,6 +279,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to start D-Bus notification service");
 
     // ============================================================
+    // MITOS-SESSION IPC (lock screen, session lifecycle)
+    // ============================================================
+
+    let session_ipc = session_ipc::SessionIpc::connect();
+
+    // ============================================================
     // MITOS STATE
     // ============================================================
 
@@ -290,7 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec![output.clone()], // Multi-monitor support
         home_screen,
         dbus_service,
-        None,
+        session_ipc,
     );
 
     // ============================================================
@@ -618,6 +625,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Poll D-Bus notifications
         state.poll_dbus();
+        state.poll_session_ipc();
 
         // ========================================================
         // FRAME SCHEDULING & DAMAGE TRACKING
