@@ -316,6 +316,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     seat.add_pointer();
 
     let dbus_service = crate::dbus::DbusService::new().expect("Failed to start D-Bus notification service");
+    let session_ipc = crate::session_ipc::SessionIpc::connect();
 
     let home_screen = crate::desktop::HomeScreenConfig::load();
     crate::theme::MitosTheme::apply_runtime(&home_screen);
@@ -330,7 +331,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         initial_outputs,
         home_screen,
         dbus_service,
-        None,
+        session_ipc,
     );
 
     let wallpaper = crate::renderer::Wallpaper::load_default().map_err(|e| format!("MITOS GUI: {e}"))?;
@@ -380,6 +381,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         if tray.refresh(&state.network, &state.battery, state.volume, state.muted) { state.pending_full_redraw = true; }
         if state.notifications.tick() { state.pending_full_redraw = true; }
         state.poll_dbus();
+        state.poll_session_ipc();
 
         if state.drm_vblank || full_redraw_frames > 0 {
             state.drm_vblank = false;
