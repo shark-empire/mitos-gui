@@ -1504,7 +1504,14 @@ pub fn collect_auth_elements(
     let field_x = x + 20;
     let field_y = y + 120;
     
-    let field_bg = SolidColorBuffer::new((field_w, field_h), Color32F::new(0.0, 0.0, 0.0, 0.3));
+    let field_bg_color = if auth.error_msg.is_some() {
+        Color32F::new(0.6, 0.15, 0.15, 0.35) // reddish flash on a rejected attempt
+    } else if auth.pending {
+        Color32F::new(0.0, 0.0, 0.0, 0.15) // dimmed while mitos-session checks
+    } else {
+        Color32F::new(0.0, 0.0, 0.0, 0.3)
+    };
+    let field_bg = SolidColorBuffer::new((field_w, field_h), field_bg_color);
     elements.extend(field_bg.render_elements(renderer, (field_x, field_y).into(), scale, 1.0));
 
     let dot_color = Color32F::new(1.0, 1.0, 1.0, 1.0);
