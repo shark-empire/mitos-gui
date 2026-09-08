@@ -4,6 +4,9 @@
 //! will be wired to D-Bus (org.freedesktop.Notifications) in a future stage.
 
 use std::time::Instant;
+use std::collections::HashMap;
+use zbus::{Connection, Result};
+use zbus::zvariant::Value;
 use crate::text::{TextRenderer, TextTexture};
 
 #[derive(Clone, Debug)]
@@ -75,4 +78,51 @@ impl NotificationManager {
         self.active.retain(|n| now.duration_since(n.created_at).as_secs() < n.duration_secs);
         self.active.len() != before
     }
+
+    //! D-Bus notification helper for MITOS GUI.
+
+
+/// Sends a desktop notification via D-Bus (org.freedesktop.Notifications).
+pub async fn notify(
+    summary: &str,
+    body: &str,
+    icon: &str,
+    timeout_ms: i32,
+) -> Result<()> {
+    let connection = Connection::session().await?;
+    
+    // Call org.freedesktop.Notifications.Notify
+    let reply: u32 = connection.call_method(
+        Some("org.freedesktop.Notifications"),
+        "/org/freedesktop/Notifications",
+        Some("org.freedesktop.Notifications"),
+        "Notify",
+        &(
+            "MITOS Shell",           // app_name
+            0u32,                     // replaces_id (0 = new notification)
+            icon,                     // app_icon
+            summary,                  // summary
+            body,                     // body
+            Vec::<String>::new(),     // actions
+            HashMap::<String, Value>::new(), // hints
+            timeout_ms,               // expire_timeout
+        ),
+    ).await?.body().deserialize()?;
+
+    Ok(())
+}
+
+/// Shows a lock screen error toast.
+pub async fn show_lock_error(message: &str) {
+    if let Err(e) = notify("Lock Screen", message, "dialog-warning", 5000).await {
+        tracing::warn!("Failed to show notification: {}", e);
+    }
+}
+
+/// Shows a general info toast.
+pub async fn show_info(summary: &str, body: &str) {
+    if let Err(e) = notify(summary, body, "dialog-information", 3000).await {
+        tracing::warn!("Failed to show notification: {}", e);
+    }
+  }
 }
