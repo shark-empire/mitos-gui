@@ -189,6 +189,29 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     state.pending_full_redraw = true;
                     return FilterResult::Intercept(());
                 }
+                                // Super + L: ask mitos-session to lock the session.
+                // mitos-session decides yes/no (e.g. no password set =>
+                // refused); the refusal arrives back through
+                // poll_session_ipc() as Response::Error and becomes a toast.
+                if !mods.shift && keysym == keysyms::KEY_l.into() {
+                    match state.session_ipc.as_mut() {
+                        Some(ipc) => {
+                            let session_id = ipc.session_id;
+                            ipc.send(&mitos_session::ipc::Request::LockSession { session_id });
+                        }
+                        None => {
+                            // Standalone/dev run: no mitos-session to lock us.
+                            state.notifications.push(
+                                "MITOS Security",
+                                "Cannot lock screen",
+                                "Not connected to mitos-session.",
+                            );
+                            state.pending_full_redraw = true;
+                        }
+                    }
+                    return FilterResult::Intercept(());
+                }
+
 
                 // Super + Down: Minimize
                 // Super + Shift + Down: Restore last minimized
