@@ -478,11 +478,30 @@ pub fn remove_output(&mut self, output: &Output) {
                         self.auth.lock("Locked");
                     }
                 }
+                    Message::Response(Response::Error(msg)) => {
+                    // mitos-session refused something we asked for. The
+                    // common case is LockSession rejected because the
+                    // account has no password -- surface why, instead of
+                    // the lock screen silently doing nothing.
+                    let (title, body) =
+                        if msg.contains("No password set") || msg.contains("Lock screen disabled")
+                        {
+                            (
+                                "Cannot lock screen",
+                                "No password is set for this user. Set one in Settings → Users → Change Password.",
+                            )
+                        } else {
+                            ("Session manager error", msg.as_str())
+                        };
+                    self.notifications.push("MITOS Security", title, body);
+                }
                 _ => {}
+
             }
             self.pending_full_redraw = true;
         }
     }
+    
 
         /// Switches the workspace on a specific monitor
     pub fn switch_workspace(&mut self, output_name: &str, ws: usize) {
