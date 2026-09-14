@@ -1495,9 +1495,39 @@ pub fn collect_auth_elements(
     let bg = SolidColorBuffer::new((w, h), Color32F::new(bg_color.r, bg_color.g, bg_color.b, 0.95));
     elements.extend(bg.render_elements(renderer, (x, y).into(), scale, 1.0));
 
-    let border = crate::theme::MitosTheme::BORDER;
-    let b_buf = SolidColorBuffer::new((w, 1), Color32F::new(border.r, border.g, border.b, border.a));
-    elements.extend(b_buf.render_elements(renderer, (x, y + h - 1).into(), scale, 1.0));
+    // A critical-risk elevation prompt gets a red accent border instead
+    // of the usual neutral one, so it visibly reads as more urgent
+    // than a merely-elevated one before a word of the text is read.
+    let border = if auth.critical {
+        Color32F::new(0.75, 0.2, 0.2, 0.9)
+    } else {
+        let b = crate::theme::MitosTheme::BORDER;
+        Color32F::new(b.r, b.g, b.b, b.a)
+    };
+    let border_h = if auth.critical { 2 } else { 1 };
+    let b_buf = SolidColorBuffer::new((w, border_h), border);
+    elements.extend(b_buf.render_elements(renderer, (x, y + h - border_h).into(), scale, 1.0));
+    if auth.critical {
+        // Top edge too, so the accent reads as a frame around the
+        // whole prompt rather than a rule under it.
+        let t_buf = SolidColorBuffer::new((w, border_h), border);
+        elements.extend(t_buf.render_elements(renderer, (x, y).into(), scale, 1.0));
+    }
+
+    // Title ("Locked" / the requesting app's name) and subtitle (the
+    // lock reason / "<action> · <risk> · <duration>") -- cached on
+    // `auth` itself and only re-rasterized when they actually change,
+    // see `AuthPrompt::refresh_title_textures`.
+    if let Some(tex) = &auth.title_tex {
+        if let Ok(el) = tex.element(renderer, (x + 20, y + 22)) {
+            elements.push(ChromeRenderElement::Buffer(el));
+        }
+    }
+    if let Some(tex) = &auth.subtitle_tex {
+        if let Ok(el) = tex.element(renderer, (x + 20, y + 50)) {
+            elements.push(ChromeRenderElement::Buffer(el));
+        }
+    }
 
     let field_w = w - 40;
     let field_h = 40;
@@ -1526,6 +1556,34 @@ pub fn collect_auth_elements(
         
         let dot = SolidColorBuffer::new((dot_size, dot_size), dot_color);
         elements.extend(dot.render_elements(renderer, (dot_x, dot_y).into(), scale, 1.0));
+    }
+
+    // Below the field: the error from the last attempt if there is
+    // one, otherwise (for an elevation prompt only -- the lock screen
+    // has no cancel) a reminder that Escape declines. Rendered fresh
+    // each frame rather than cached: unlike the title/subtitle above,
+    // `error_msg` can be set by a direct field write from
+    // `poll_session_ipc` (mirroring how the rest of this struct
+    // already works), so there's no single choke point to hook a
+    // cache-refresh into -- and a short line of text shown for at
+    // most a few seconds is cheap enough to just re-rasterize.
+    let hint_y = field_y + field_h + 14;
+    if let Some(err) = &auth.error_msg {
+        if let Some(img) = auth.text_renderer.render(err, 13.0, (255, 150, 150, 255)) {
+            if let Some(tex) = crate::text::TextTexture::from_rgba(img) {
+                if let Ok(el) = tex.element(renderer, (field_x, hint_y)) {
+                    elements.push(ChromeRenderElement::Buffer(el));
+                }
+            }
+        }
+    } else if auth.request_id.is_some() {
+        if let Some(img) = auth.text_renderer.render("Enter to allow  ·  Esc to decline", 13.0, (170, 170, 170, 220)) {
+            if let Some(tex) = crate::text::TextTexture::from_rgba(img) {
+                if let Ok(el) = tex.element(renderer, (field_x, hint_y)) {
+                    elements.push(ChromeRenderElement::Buffer(el));
+                }
+            }
+        }
     }
 
     elements

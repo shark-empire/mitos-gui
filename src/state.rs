@@ -440,6 +440,7 @@ pub fn remove_output(&mut self, output: &Output) {
     pub fn poll_session_ipc(&mut self) {
         use mitos_session::ipc::{Event as SessionEvent, Message, Response};
         use mitos_session::authentication::AuthOutcome;
+        use mitos_session::elevation::ElevationRisk;
         use mitos_session::lock::LockReason;
 
         let Some(ipc) = self.session_ipc.as_ref() else { return };
@@ -468,6 +469,68 @@ pub fn remove_output(&mut self, output: &Output) {
                             self.auth.error_msg = Some(format!("Too many attempts -- try again in {retry_after_secs}s"));
                         }
                         AuthOutcome::Error(msg) => self.auth.error_msg = Some(msg),
+                        // Unlock has no concept of "cancelled" -- this
+                        // variant only ever comes from an elevation
+                        // prompt (`ElevationFeedback`, below) -- but
+                        // `AuthOutcome` is shared between the two flows,
+                        // so it still has to be handled here.
+                        AuthOutcome::Cancelled => {}
+                    }
+                }
+                // mitos-session, relaying a request from mitos-service,
+                // wants the logged-in user verified before a privileged
+                // action proceeds -- see mitos-session's docs/security.md
+                // for why only mitos-session (never the app itself) can
+                // trigger this. `action` is display text only; this
+                // module doesn't interpret it, same as `LockReason` above.
+                Message::Event(SessionEvent::ShowElevationPrompt { request_id, action, .. }) => {
+                    let critical = action.risk == ElevationRisk::Critical;
+                    let risk = match action.risk {
+                        ElevationRisk::Critical => "CRITICAL",
+                        ElevationRisk::Elevated => "Elevated",
+                    };
+                    let subtitle = format!("{} · {risk} · {}", action.description, action.duration_label);
+                    self.auth.request_elevation(request_id, &action.requesting_app, &subtitle, critical);
+                }
+                // One attempt against the prompt we're currently
+                // showing was checked -- mirrors `AuthFeedback` above,
+                // right down to never closing the prompt itself
+                // (`HideElevationPrompt`, below, is the only thing that
+                // does). Feedback for a request we're not currently
+                // showing (already resolved locally, or still waiting
+                // in the queue) is stale and ignored.
+                Message::Event(SessionEvent::ElevationFeedback { request_id, outcome }) => {
+                    if self.auth.request_id == Some(request_id) {
+                        self.auth.pending = false;
+                        self.auth.error_msg = match outcome {
+                            AuthOutcome::Success => None,
+                            AuthOutcome::Failure { attempts_remaining } => {
+                                Some(format!("Incorrect password ({attempts_remaining} attempts left)"))
+                            }
+                            AuthOutcome::LockedOut { retry_after_secs } => {
+                                Some(format!("Too many attempts -- try again in {retry_after_secs}s"))
+                            }
+                            AuthOutcome::Error(msg) => Some(msg),
+                            // Someone else (root, via mitos-sessionctl)
+                            // cancelled this prompt out from under us.
+                            // `HideElevationPrompt` for the same request
+                            // follows right behind and is what actually
+                            // closes it, same as any other terminal
+                            // outcome here.
+                            AuthOutcome::Cancelled => Some("Cancelled".to_string()),
+                        };
+                    }
+                }
+                // The prompt for `request_id` is resolved, whatever the
+                // reason (answered, cancelled, timed out, or its
+                // session ended) -- dismiss it if it's the one we're
+                // showing, or drop it from the queue if it was still
+                // waiting its turn.
+                Message::Event(SessionEvent::HideElevationPrompt { request_id }) => {
+                    if self.auth.request_id == Some(request_id) {
+                        self.auth.resolve_elevation();
+                    } else {
+                        self.auth.remove_from_queue(request_id);
                     }
                 }
                 Message::Response(resp @ Response::Session(_)) => {

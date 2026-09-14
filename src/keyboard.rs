@@ -368,14 +368,20 @@ fn handle_auth_input(
 
     match keysym {
         keysyms::KEY_Escape => {
-            state.auth.cancel();
-            if !state.auth.is_lock_screen {
-                state.notifications.push("MITOS Security", "Authentication cancelled", "");
+            if state.auth.request_id.is_some() {
+                cancel_elevation(state);
+            } else {
+                state.auth.cancel();
+                if !state.auth.is_lock_screen {
+                    state.notifications.push("MITOS Security", "Authentication cancelled", "");
+                }
             }
         }
         keysyms::KEY_Return => {
             if state.auth.is_lock_screen {
                 submit_lock_screen(state);
+            } else if state.auth.request_id.is_some() {
+                submit_elevation(state);
             } else if state.auth.submit() {
                 state.notifications.push("MITOS Security", "Authentication successful", "Privileges granted.");
             } else {
@@ -421,4 +427,51 @@ fn submit_lock_screen(state: &mut MitosGuiState) {
 
     state.auth.pending = true;
     ipc.send(&mitos_session::ipc::Request::Unlock { session_id, user_name, password });
+}
+
+/// Answer the currently-shown elevation prompt with `response`, then
+/// wait for mitos-session's own `HideElevationPrompt` to actually
+/// close it (`poll_session_ipc`) rather than closing locally -- same
+/// "mitos-session decides, mitos-gui only reacts" rule the lock screen
+/// follows, and it means a cancel that arrived from somewhere else
+/// (e.g. root running `mitos-sessionctl`) and our own cancel here end
+/// up going through exactly one code path.
+fn respond_elevation(state: &mut MitosGuiState, response: mitos_session::elevation::ElevationResponse) {
+    if state.auth.pending {
+        return;
+    }
+    let Some(request_id) = state.auth.request_id else { return };
+
+    let Some(ipc) = state.session_ipc.as_mut() else {
+        state.auth.error_msg = Some("Not connected to mitos-session".to_string());
+        return;
+    };
+
+    state.auth.pending = true;
+    ipc.send(&mitos_session::ipc::Request::RespondElevation { request_id, response });
+}
+
+/// Send the typed password for the active elevation prompt -- mirrors
+/// `submit_lock_screen`, just against `RespondElevation` instead of
+/// `Unlock`. Checks `pending` before touching `password`, not after:
+/// otherwise a second Enter mashed while the first submission is
+/// still in flight would silently discard whatever's been typed since
+/// (`respond_elevation`'s own `pending` guard is too late for that --
+/// by the time it runs, the password this call read would already be
+/// gone either way).
+fn submit_elevation(state: &mut MitosGuiState) {
+    if state.auth.pending {
+        return;
+    }
+    let password = std::mem::take(&mut state.auth.password);
+    respond_elevation(state, mitos_session::elevation::ElevationResponse::Password(password));
+}
+
+/// Decline the active elevation prompt. Unlike the lock screen,
+/// elevation prompts *can* be turned down -- mitos-service just gets
+/// told no, the same as if the password had been wrong every time
+/// until it gave up asking.
+fn cancel_elevation(state: &mut MitosGuiState) {
+    state.auth.password.clear();
+    respond_elevation(state, mitos_session::elevation::ElevationResponse::Cancelled);
 }
