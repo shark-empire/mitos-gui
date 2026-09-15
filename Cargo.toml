@@ -18,6 +18,8 @@ smithay = { version = "0.7", features = [
     "renderer_gl",
 ] }
 
+rust-i18n = "3.0"
+
 nix = { version = "0.29", features = ["fs", "signal", "process"] }
 libc = "0.2"
 sd_notify = "0.4"
