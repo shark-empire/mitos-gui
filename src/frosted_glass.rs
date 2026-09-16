@@ -119,6 +119,136 @@ pub fn compile_frosted_program(renderer: &mut GlesRenderer, radius: f32) -> Resu
     )
 }
 
+/// The GLSL fragment shader for the per-window "Liquid Glass" frame: the
+/// same 9-tap blur + tint + highlight as [`FROSTED_GLASS_SHADER`], but
+/// with a second, smaller rounded-rect subtracted out of the mask —
+/// turning the filled panel into a thin ring. The window's own content
+/// (drawn separately, underneath) shows through the hole in the middle
+/// untouched; only the edge gets the frosted treatment. Because this
+/// samples the same whole-desktop background capture the shell panels
+/// use and never reads the window's own pixels, it applies identically
+/// whether the window belongs to a MITOS-native app or an unmodified
+/// third-party Wayland client.
+///
+/// `__RADIUS__`/`__INNER_RADIUS__`/`__RING__` are substituted before
+/// compilation, same plain-string-replace approach as
+/// [`FROSTED_GLASS_SHADER`]'s `__RADIUS__`.
+const WINDOW_FRAME_SHADER: &str = r#"
+//_DEFINES
+precision mediump float;
+varying vec2 v_coords;
+uniform sampler2D tex;
+uniform float alpha;
+uniform float tint;
+uniform vec2 u_tex_size;
+uniform vec2 u_size;
+uniform vec4 u_tint_color;
+uniform vec4 u_border_color;
+
+const float RADIUS = __RADIUS__;
+const float INNER_RADIUS = __INNER_RADIUS__;
+const float RING = __RING__;
+
+float sd_round_box(vec2 p, vec2 half_size, float r) {
+    vec2 q = abs(p) - half_size + vec2(r);
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+void main() {
+    vec2 texel = 1.0 / u_tex_size;
+    vec4 sum = vec4(0.0);
+
+    float w0 = 0.227027;
+    float w1 = 0.1945946;
+    float w2 = 0.1216216;
+    float w3 = 0.054054;
+    float w4 = 0.016216;
+
+    sum += texture2D(tex, v_coords) * w0;
+
+    sum += texture2D(tex, v_coords + vec2( 1.0,  0.0) * texel) * w1;
+    sum += texture2D(tex, v_coords + vec2(-1.0,  0.0) * texel) * w1;
+    sum += texture2D(tex, v_coords + vec2( 0.0,  1.0) * texel) * w1;
+    sum += texture2D(tex, v_coords + vec2( 0.0, -1.0) * texel) * w1;
+
+    sum += texture2D(tex, v_coords + vec2( 2.0,  0.0) * texel) * w2;
+    sum += texture2D(tex, v_coords + vec2(-2.0,  0.0) * texel) * w2;
+    sum += texture2D(tex, v_coords + vec2( 0.0,  2.0) * texel) * w2;
+    sum += texture2D(tex, v_coords + vec2( 0.0, -2.0) * texel) * w2;
+
+    sum += texture2D(tex, v_coords + vec2( 3.0,  0.0) * texel) * w3;
+    sum += texture2D(tex, v_coords + vec2(-3.0,  0.0) * texel) * w3;
+    sum += texture2D(tex, v_coords + vec2( 0.0,  3.0) * texel) * w3;
+    sum += texture2D(tex, v_coords + vec2( 0.0, -3.0) * texel) * w3;
+
+    sum += texture2D(tex, v_coords + vec2( 4.0,  0.0) * texel) * w4;
+    sum += texture2D(tex, v_coords + vec2(-4.0,  0.0) * texel) * w4;
+    sum += texture2D(tex, v_coords + vec2( 0.0,  4.0) * texel) * w4;
+    sum += texture2D(tex, v_coords + vec2( 0.0, -4.0) * texel) * w4;
+
+    vec4 blurred = sum * 0.5;
+
+    vec4 colored = blurred * u_tint_color;
+
+    // Specular highlight on the top edge (glass reflection) — only
+    // visible where the ring mask below is actually nonzero.
+    float highlight = smoothstep(0.0, 0.05, v_coords.y) * (1.0 - smoothstep(0.05, 0.1, v_coords.y));
+    colored += vec4(1.0, 1.0, 1.0, highlight * 0.3);
+
+    float border = step(0.99, v_coords.y) * u_border_color.a;
+    colored = mix(colored, u_border_color, border * 0.5);
+
+    vec2 p = v_coords * u_size;
+    vec2 half_size = u_size * 0.5;
+
+    // Outer rounded silhouette, same shape as a normal frosted panel.
+    float d_outer = sd_round_box(p - half_size, half_size, RADIUS);
+    float mask_outer = 1.0 - smoothstep(-1.0, 1.0, d_outer);
+
+    // Inner cutout, sized from the ring thickness so it tracks whatever
+    // this element's actual size is this frame (`u_size` already comes
+    // in fresh every draw) without needing a second per-frame uniform.
+    vec2 inner_half_size = max(half_size - vec2(RING), vec2(0.0));
+    float d_inner = sd_round_box(p - half_size, inner_half_size, INNER_RADIUS);
+    float mask_inner = 1.0 - smoothstep(-1.0, 1.0, d_inner);
+
+    float mask = clamp(mask_outer - mask_inner, 0.0, 1.0);
+
+    gl_FragColor = colored * alpha * mask;
+}
+"#;
+
+/// Compiles the per-window Liquid Glass frame shader program.
+///
+/// `outer_radius` should match [`crate::theme::MitosTheme::effective_window_radius`]
+/// and `ring_thickness` the sum of `WINDOW_FRAME_OUTSET` + `WINDOW_FRAME_OVERLAP`,
+/// so the true-blur frame lines up with its procedural fallback
+/// (`renderer::create_window_frame_element`). Reuses the exact same
+/// uniform set as [`compile_frosted_program`] — and therefore the exact
+/// same [`FrostedGlassElement`] — since only the compiled program
+/// differs between a filled panel and a ring.
+pub fn compile_window_frame_program(
+    renderer: &mut GlesRenderer,
+    outer_radius: f32,
+    ring_thickness: f32,
+) -> Result<GlesTexProgram, GlesError> {
+    let inner_radius = (outer_radius - ring_thickness).max(0.0);
+    let shader = WINDOW_FRAME_SHADER
+        .replace("__RADIUS__", &format!("{outer_radius:.8}"))
+        .replace("__INNER_RADIUS__", &format!("{inner_radius:.8}"))
+        .replace("__RING__", &format!("{ring_thickness:.8}"));
+
+    renderer.compile_custom_texture_shader(
+        shader,
+        &[
+            smithay::backend::renderer::gles::UniformName::new("u_tex_size", smithay::backend::renderer::gles::UniformType::_2f),
+            smithay::backend::renderer::gles::UniformName::new("u_size", smithay::backend::renderer::gles::UniformType::_2f),
+            smithay::backend::renderer::gles::UniformName::new("u_tint_color", smithay::backend::renderer::gles::UniformType::_4f),
+            smithay::backend::renderer::gles::UniformName::new("u_border_color", smithay::backend::renderer::gles::UniformType::_4f),
+        ],
+    )
+}
+
 /// The render element that draws the frosted glass panel.
 pub struct FrostedGlassElement {
     pub geometry: Rectangle<i32, Physical>,
