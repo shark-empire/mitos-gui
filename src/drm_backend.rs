@@ -350,6 +350,16 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let launcher_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
     let dock_frost = crate::frosted_glass::compile_frosted_program(&mut renderer_rc.borrow_mut(), panel_radius)?;
 
+    // Per-window Liquid Glass frame — same true-blur mechanism as the
+    // shell panels above, compiled as a ring so a window's own content
+    // shows through the middle untouched. See `compile_window_frame_program`.
+    let window_radius = crate::theme::MitosTheme::effective_window_radius();
+    let window_ring = crate::theme::MitosTheme::WINDOW_FRAME_OUTSET
+        + crate::theme::MitosTheme::WINDOW_FRAME_OVERLAP;
+    let window_frame_frost = crate::frosted_glass::compile_window_frame_program(
+        &mut renderer_rc.borrow_mut(), window_radius, window_ring,
+    )?;
+    window_chrome.refresh_frame_fallback(&mut renderer_rc.borrow_mut());
 
     let top_bar_shadow = SolidColorBuffer::new((0, 0), crate::renderer::shadow_color());
     let top_bar_highlight = SolidColorBuffer::new((0, 0), crate::renderer::glass_highlight_color());
@@ -445,7 +455,8 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
 
                 let elements = match crate::renderer::collect_frame_elements(
                     renderer, &state.space, scale, &wallpaper, output_size,
-                    &mut window_chrome, &state.popups, shell_elements, std::iter::empty(),
+                    &mut window_chrome, bg_texture.as_ref(), &window_frame_frost,
+                    &state.popups, shell_elements, std::iter::empty(),
                     &state.notifications.active, top_bar_height, &state.auth,
                     current_ws, &output_name, state.workspace_swipe_x, output_size.w,
                     &state.osd, state.night_light,
