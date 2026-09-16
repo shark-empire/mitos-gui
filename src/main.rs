@@ -423,13 +423,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dock_frost =
         frosted_glass::compile_frosted_program(backend.renderer(), panel_radius)?;
 
+    // Per-window Liquid Glass frame: same true-blur mechanism as the
+    // shell panels above, but compiled as a ring (see
+    // `compile_window_frame_program`) so a window's own content shows
+    // through the middle untouched.
+    let window_radius = theme::MitosTheme::effective_window_radius();
+    let window_ring =
+        theme::MitosTheme::WINDOW_FRAME_OUTSET + theme::MitosTheme::WINDOW_FRAME_OVERLAP;
+    let mut window_frame_frost =
+        frosted_glass::compile_window_frame_program(backend.renderer(), window_radius, window_ring)?;
+
     let mut shell_text = renderer::ShellTextState::new();
     
     let mut tray = renderer::TrayState::new();
 
     
-    // NEW: Window shadow/border cache
-    let mut window_chrome = renderer::WindowChrome::new(); 
+    // Window shadow + Liquid Glass frame cache
+    let mut window_chrome = renderer::WindowChrome::new();
+    window_chrome.refresh_frame_fallback(backend.renderer());
 
 
     // ============================================================
@@ -590,6 +601,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 dock_frost = frost;
             }
+
+            // Recompile the per-window Liquid Glass frame the same way,
+            // in case the theme's window radius changed.
+            let window_radius = theme::MitosTheme::effective_window_radius();
+            let window_ring =
+                theme::MitosTheme::WINDOW_FRAME_OUTSET + theme::MitosTheme::WINDOW_FRAME_OVERLAP;
+            if let Ok(frost) = frosted_glass::compile_window_frame_program(
+                backend.renderer(), window_radius, window_ring,
+            ) {
+                window_frame_frost = frost;
+            }
+            window_chrome.refresh_frame_fallback(backend.renderer());
 
             // Swap wallpaper if home.conf points to a new one.
             if let Some(wp_path) = state.home_screen.wallpaper_path.clone() {
@@ -834,6 +857,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &wallpaper,
                             output_size,
                             &mut window_chrome,
+                            bg_texture.as_ref(),
+                            &window_frame_frost,
                             &state.popups,
                             shell_elements,
                             std::iter::empty(),

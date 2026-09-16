@@ -616,6 +616,149 @@ void main() {{
     ))
 }
 
+/// Tint used for the per-window Liquid Glass frame. Deliberately the
+/// same color the shell panels use (`glass_color()`), so windows and
+/// panels read as one cohesive material rather than two different
+/// "glass" looks — and so a runtime glass-tint change from home.conf
+/// updates both together.
+pub fn window_frame_tint_color() -> Color32F {
+    glass_color()
+}
+
+/// Border/rim color for the per-window Liquid Glass frame. Uses
+/// `BORDER_BRIGHT` (previously defined in the theme but never wired up
+/// anywhere) rather than the flatter `BORDER` the old per-window outline
+/// used, so the glass edge reads as a brighter, more light-catching rim.
+pub fn window_frame_border_color() -> Color32F {
+    let c = MitosTheme::BORDER_BRIGHT;
+    Color32F::new(c.r, c.g, c.b, c.a)
+}
+
+/// Procedural fallback for the per-window Liquid Glass frame, used on
+/// any frame where a background capture isn't available yet (mirrors
+/// `create_glass_panel_element`'s role for the shell panels — same
+/// visual language: rounded mask, fresnel rim, top specular, liquid
+/// sheen, chromatic edge, grain). A second, smaller rounded rect is
+/// subtracted from the mask so only the window's edge draws; the
+/// window's own content shows through the hole in the middle untouched.
+/// The hole size is derived from the element's own `size` uniform
+/// (already supplied fresh every frame by `resize()`, same as the
+/// filled panel shader above) rather than a second per-frame uniform.
+pub fn create_window_frame_element(
+    renderer: &mut GlesRenderer,
+) -> Result<PixelShaderElement, GlesError> {
+    let glass = MitosTheme::effective_glass();
+    let outer_radius = MitosTheme::effective_window_radius();
+    let ring = MitosTheme::WINDOW_FRAME_OUTSET + MitosTheme::WINDOW_FRAME_OVERLAP;
+    let inner_radius = (outer_radius - ring).max(0.0);
+
+    let shader = format!(
+        r#"
+precision mediump float;
+
+varying vec2 v_coords;
+uniform vec2 size;
+
+const float RADIUS = {radius:.8};
+const float INNER_RADIUS = {inner_radius:.8};
+const float RING = {ring:.8};
+
+const vec4 TINT = vec4(
+    {r:.8},
+    {g:.8},
+    {b:.8},
+    {a:.8}
+);
+
+const float SPECULAR = {specular:.8};
+const float RIM      = {rim:.8};
+const float GRAIN    = {grain:.8};
+
+float sd_round_box(vec2 p, vec2 half_size, float r) {{
+    vec2 q = abs(p) - half_size + vec2(r);
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}}
+
+float hash(vec2 p) {{
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}}
+
+void main() {{
+    vec2 p = v_coords * size;
+    vec2 half_size = size * 0.5;
+
+    float d_outer = sd_round_box(p - half_size, half_size, RADIUS);
+    float mask_outer = 1.0 - smoothstep(-1.0, 1.0, d_outer);
+
+    vec2 inner_half_size = max(half_size - vec2(RING), vec2(0.0));
+    float d_inner = sd_round_box(p - half_size, inner_half_size, INNER_RADIUS);
+    float mask_inner = 1.0 - smoothstep(-1.0, 1.0, d_inner);
+
+    float mask = clamp(mask_outer - mask_inner, 0.0, 1.0);
+
+    if (mask <= 0.001) {{
+        gl_FragColor = vec4(0.0);
+        return;
+    }}
+
+    float edge = smoothstep(-8.0, 0.0, d_outer);
+    float inner = 1.0 - edge;
+
+    float top_light = smoothstep(0.15, 0.9, 1.0 - v_coords.y);
+
+    float sheen =
+        (sin((v_coords.x + v_coords.y * 0.7) * 6.28318) * 0.5 + 0.5);
+    sheen = smoothstep(0.6, 1.0, sheen) * 0.06;
+
+    float grain = (hash(p) - 0.5) * GRAIN;
+
+    vec3 color = TINT.rgb;
+
+    color.r += edge * 0.04;
+    color.g += edge * 0.06;
+    color.b += edge * 0.10;
+
+    color += top_light * SPECULAR * 0.30;
+    color += sheen;
+    color += edge * inner * RIM * 0.35;
+    color += grain;
+
+    float alpha = TINT.a * mask;
+    alpha = max(alpha, edge * inner * RIM * 0.45 * mask);
+
+    gl_FragColor = vec4(color, alpha);
+}}
+"#,
+        radius = outer_radius,
+        inner_radius = inner_radius,
+        ring = ring,
+        r = glass.r,
+        g = glass.g,
+        b = glass.b,
+        a = glass.a,
+        specular = MitosTheme::effective_specular(),
+        rim = MitosTheme::LIQUID_RIM,
+        grain = MitosTheme::LIQUID_GRAIN,
+    );
+
+    let program = renderer.compile_custom_pixel_shader(
+        shader,
+        &[],
+    )?;
+
+    Ok(PixelShaderElement::new(
+        program,
+        Rectangle::new(
+            (0, 0).into(),
+            (1, 1).into(),
+        ),
+        None,
+        1.0,
+        Vec::new(),
+        Kind::Unspecified,
+    ))
+}
+
 
 // ============================================================================
 // GENERIC GLASS PANEL RENDERING
@@ -1319,10 +1462,13 @@ fn generate_shadow_image(
     img
 }
 
-/// Caches the window shadow texture so we don't regenerate it every frame.
+/// Caches the window shadow texture, plus the procedural fallback used
+/// by the per-window Liquid Glass frame before any background capture
+/// exists, so neither is regenerated every frame.
 pub struct WindowChrome {
     shadow_buffer: Option<MemoryRenderBuffer>,
     shadow_size: Size<i32, Logical>,
+    frame_fallback: Option<PixelShaderElement>,
 }
 
 impl WindowChrome {
@@ -1330,6 +1476,7 @@ impl WindowChrome {
         Self {
             shadow_buffer: None,
             shadow_size: Size::from((0, 0)),
+            frame_fallback: None,
         }
     }
 
@@ -1360,20 +1507,43 @@ impl WindowChrome {
         self.shadow_buffer = Some(buffer);
         self.shadow_size = size;
     }
+
+    /// (Re)compile the procedural fallback used for the per-window glass
+    /// frame before any background capture is available this run. Called
+    /// once at startup and again whenever the theme reloads (the window
+    /// radius may have changed), mirroring how the shell's procedural
+    /// glass panels get recompiled. A failure here just leaves windows
+    /// without a frame until the next successful call — never fatal.
+    pub fn refresh_frame_fallback(&mut self, renderer: &mut GlesRenderer) {
+        if let Ok(el) = create_window_frame_element(renderer) {
+            self.frame_fallback = Some(el);
+        }
+    }
 }
 
-/// Wrap a Wayland window with MITOS shadows and borders.
+/// Wrap a Wayland window with MITOS's drop shadow. Skipped for fullscreen
+/// windows — the window already fills the whole output, so a shadow
+/// would only be wasted off-screen work.
+///
+/// (The old flat 1px border that used to live here has been replaced by
+/// the true Liquid Glass frame in `collect_window_glass_frame_elements`,
+/// drawn after the window's own content — see that function.)
 pub fn collect_window_chrome_elements(
     renderer: &mut GlesRenderer,
     window: &Window,
     location: Point<i32, Logical>,
-    scale: Scale<f64>,
+    _scale: Scale<f64>,
     chrome: &mut WindowChrome,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
+
+    if crate::wm::meta(window).fullscreen {
+        return elements;
+    }
+
     let geo = window.geometry();
-    
-    // 1. Shadow
+
+    // Shadow
     chrome.ensure_shadow(geo.size.w, geo.size.h);
     if let Some(buf) = &chrome.shadow_buffer {
         let pad = 24;
@@ -1392,20 +1562,74 @@ pub fn collect_window_chrome_elements(
         }
     }
 
-    // 2. Window Border (1px solid accent/glass border)
-    let border_color = crate::theme::MitosTheme::BORDER;
-    let border_buf = SolidColorBuffer::new(
-        (geo.size.w + 2, geo.size.h + 2),
-        Color32F::new(border_color.r, border_color.g, border_color.b, border_color.a * 0.5),
-    );
-    
-    let border_loc = Point::from((location.x - 1, location.y - 1));
-    elements.extend(border_buf.render_elements(
-        renderer,
-        border_loc,
-        scale,
-        1.0,
-    ));
+    elements
+}
+
+/// Per-window Liquid Glass frame: a thin frosted-glass ring around a
+/// window's edge, sampling the same offscreen background capture the
+/// shell panels use so it shows a genuine blur of whatever actually
+/// sits behind that window (wallpaper, or another window further back).
+/// Falls back to the procedural ring shader (`create_window_frame_element`,
+/// cached on `chrome`) on any frame where a capture isn't available.
+///
+/// Callers must draw this *after* the window's own content: the ring's
+/// rounded outer edge is meant to visually cover the client's square
+/// corners, which only works if it's painted on top. This is pure
+/// compositor-side chrome — it never reads or needs to know anything
+/// about the window's own pixels — so it applies the same way to a
+/// MITOS-native window and an unmodified third-party Wayland client.
+///
+/// Skipped for fullscreen windows, same as the shadow above.
+pub fn collect_window_glass_frame_elements(
+    window: &Window,
+    location: Point<i32, Logical>,
+    scale: Scale<f64>,
+    bg: Option<(&GlesTexture, &GlesTexProgram)>,
+    chrome: &mut WindowChrome,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+
+    if crate::wm::meta(window).fullscreen {
+        return elements;
+    }
+
+    let geo = window.geometry();
+    let outset = MitosTheme::WINDOW_FRAME_OUTSET.round() as i32;
+
+    let frame_loc = Point::from((location.x - outset, location.y - outset));
+    let frame_size = Size::from((geo.size.w + outset * 2, geo.size.h + outset * 2));
+
+    if frame_size.w <= 0 || frame_size.h <= 0 {
+        return elements;
+    }
+
+    if let Some((bg_texture, program)) = bg {
+        let phys_loc = frame_loc
+            .to_f64()
+            .to_physical(scale)
+            .to_i32_round();
+        let phys_size = frame_size
+            .to_f64()
+            .to_physical(scale)
+            .to_i32_round();
+
+        elements.push(ChromeRenderElement::Frosted(
+            crate::frosted_glass::FrostedGlassElement::new(
+                Rectangle::new(phys_loc, phys_size),
+                bg_texture.clone(),
+                program.clone(),
+                window_frame_tint_color().components(),
+                window_frame_border_color().components(),
+            ),
+        ));
+    } else if let Some(fallback) = chrome.frame_fallback.as_mut() {
+        fallback.resize(
+            Rectangle::new(frame_loc, frame_size),
+            None,
+        );
+
+        elements.push(ChromeRenderElement::Glass(fallback.clone()));
+    }
 
     elements
 }
@@ -1737,6 +1961,12 @@ pub fn collect_frame_elements(
     wallpaper: &Wallpaper,
     output_size: Size<i32, Logical>,
     window_chrome: &mut WindowChrome,
+    // True frosted-glass background capture + the per-window glass
+    // frame's compiled shader program — same `None`-on-first-frame
+    // fallback contract as the shell panels' `bg_texture`/`*_frost`
+    // pairs passed into `collect_shell_elements`.
+    window_frame_bg_texture: Option<&GlesTexture>,
+    window_frame_frost: &GlesTexProgram,
     _popups: &smithay::desktop::PopupManager,
     shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
     overlay_elements: impl IntoIterator<Item = ChromeRenderElement>,
@@ -1777,13 +2007,25 @@ pub fn collect_frame_elements(
         
         let offset_x = (diff as f64 * output_width as f64) + (swipe_x * output_width as f64);
         let final_loc = Point::from((location.x as f64 + offset_x, location.y as f64));
+        let final_loc_i32 = final_loc.to_i32_round();
 
         elements.extend(collect_window_chrome_elements(
-            renderer, window, final_loc.to_i32_round(), scale, window_chrome,
+            renderer, window, final_loc_i32, scale, window_chrome,
         ));
 
         let physical_location = final_loc.to_physical(scale).to_i32_round();
         elements.extend(window.render_elements(renderer, physical_location, scale, 1.0));
+
+        // Liquid Glass window frame — drawn last so its rounded, frosted
+        // edge sits on top of the window's own (square-cornered) content
+        // and visually rounds it off. See `collect_window_glass_frame_elements`.
+        elements.extend(collect_window_glass_frame_elements(
+            window,
+            final_loc_i32,
+            scale,
+            window_frame_bg_texture.map(|t| (t, window_frame_frost)),
+            window_chrome,
+        ));
     }
 
     // ------------------------------------------------------------

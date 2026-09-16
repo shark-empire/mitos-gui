@@ -92,6 +92,16 @@ impl MitosTheme {
 
     pub const WINDOW_RADIUS: f32 = 14.0;
 
+    /// How far the per-window Liquid Glass frame extends outward past
+    /// the window's own edge (logical px).
+    pub const WINDOW_FRAME_OUTSET: f32 = 4.0;
+
+    /// How far the frame's inner cutout overlaps onto the window's own
+    /// content at each edge (logical px) — just enough to visually round
+    /// off a client's square corners without cropping real content.
+    /// Total glass-ring thickness = OUTSET + OVERLAP.
+    pub const WINDOW_FRAME_OVERLAP: f32 = 3.0;
+
     pub const PANEL_RADIUS: f32 = 18.0;
 
     pub const TOP_BAR_HEIGHT: f32 = 38.0;
@@ -214,6 +224,15 @@ impl MitosTheme {
         Self::runtime()
             .map(|rt| rt.panel_radius)
             .unwrap_or(Self::PANEL_RADIUS)
+    }
+
+    /// Get the effective per-window Liquid Glass frame radius. Kept as a
+    /// function (like the other `effective_*` accessors) so a future
+    /// home.conf option can override it without touching call sites —
+    /// no runtime override wired up for this one yet, so it's just
+    /// `WINDOW_RADIUS` today.
+    pub fn effective_window_radius() -> f32 {
+        Self::WINDOW_RADIUS
     }
 
     /// Get the effective background color.
