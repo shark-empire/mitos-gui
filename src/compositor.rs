@@ -2,6 +2,7 @@
 
 use smithay::{
     delegate_compositor,
+    delegate_data_device,
     delegate_output,
     delegate_seat,
     delegate_shm,
@@ -19,6 +20,10 @@ use smithay::wayland::{
         CompositorState,
     },
     output::OutputHandler,
+    selection::{
+        data_device::{ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler},
+        SelectionHandler,
+    },
     shell::xdg::{
         PopupSurface,
         PositionerState,
@@ -233,6 +238,32 @@ impl CompositorHandler for MitosGuiState {
 impl OutputHandler for MitosGuiState {}
 
 // ============================================================
+// CLIPBOARD / DATA DEVICE
+//
+// This is the compositor's whole job here: broker `wl_data_device`
+// (advertise offers, hand out the current selection) so any two
+// clients can copy/paste between each other -- the actual "Ctrl+C
+// copies text" behavior is each app's own toolkit calling into this
+// protocol, not something the compositor drives. `ClientDndGrabHandler`/
+// `ServerDndGrabHandler` cover drag-and-drop, which rides the same
+// protocol; empty impls (mirroring Smithay's own example) opt into
+// its default grab behavior rather than customizing it.
+// ============================================================
+
+impl SelectionHandler for MitosGuiState {
+    type SelectionUserData = ();
+}
+
+impl DataDeviceHandler for MitosGuiState {
+    fn data_device_state(&mut self) -> &mut DataDeviceState {
+        &mut self.data_device_state
+    }
+}
+
+impl ClientDndGrabHandler for MitosGuiState {}
+impl ServerDndGrabHandler for MitosGuiState {}
+
+// ============================================================
 // CLIENT STATE
 // ============================================================
 
@@ -260,3 +291,4 @@ delegate_compositor!(MitosGuiState);
 delegate_shm!(MitosGuiState);
 delegate_output!(MitosGuiState);
 delegate_seat!(MitosGuiState);
+delegate_data_device!(MitosGuiState);
