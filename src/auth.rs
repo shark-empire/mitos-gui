@@ -134,7 +134,7 @@ impl AuthPrompt {
     /// of another prompt).
     pub fn lock(&mut self, message: &str) {
         self.active = true;
-        self.app_name = "Locked".to_string();
+        self.app_name = crate::i18n::t("locked");
         self.action = message.to_string();
         self.password.clear();
         self.error_msg = None;
@@ -197,7 +197,7 @@ impl AuthPrompt {
             self.subtitle_tex = None;
             true
         } else {
-            self.error_msg = Some("Incorrect password".to_string());
+            self.error_msg = Some(crate::i18n::t("incorrect_password"));
             self.password.clear();
             false
         }
