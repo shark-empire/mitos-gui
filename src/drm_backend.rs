@@ -309,6 +309,8 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let mut shm_state = ShmState::new::<MitosGuiState>(&display_handle, vec![]);
     shm_state.update_formats(renderer_rc.borrow().shm_formats());
     let xdg_shell_state = XdgShellState::new::<MitosGuiState>(&display_handle);
+    let data_device_state =
+        smithay::wayland::selection::data_device::DataDeviceState::new::<MitosGuiState>(&display_handle);
 
     let mut seat_state = SeatState::<MitosGuiState>::new();
     let mut seat = seat_state.new_wl_seat(&display_handle, "seat0");
@@ -332,6 +334,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         home_screen,
         dbus_service,
         session_ipc,
+        data_device_state,
     );
 
     let wallpaper = crate::renderer::Wallpaper::load_default().map_err(|e| format!("MITOS GUI: {e}"))?;
@@ -345,6 +348,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let mut launcher_ring = crate::renderer::create_launcher_ring_element(&mut renderer_rc.borrow_mut())?;
     let mut auth_glass = crate::renderer::create_auth_glass_element(&mut renderer_rc.borrow_mut(), false)?;
     let mut auth_glass_critical = crate::renderer::create_auth_glass_element(&mut renderer_rc.borrow_mut(), true)?;
+    let mut notification_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
 
     // True frosted-glass (real background blur + tint) shader programs —
     // one per shell component, mirroring the winit dev backend.
@@ -461,7 +465,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                     &mut window_chrome, bg_texture.as_ref(), &window_frame_frost,
                     state.focused_window.as_ref(),
                     &state.popups, shell_elements, std::iter::empty(),
-                    &state.notifications.active, top_bar_height, &state.auth,
+                    &state.notifications.active, &mut notification_glass, top_bar_height, &state.auth,
                     &mut auth_glass, &mut auth_glass_critical,
                     current_ws, &output_name, state.workspace_swipe_x, output_size.w,
                     &state.osd, state.night_light,
