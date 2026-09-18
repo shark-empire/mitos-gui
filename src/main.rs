@@ -408,6 +408,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             backend.renderer()
         )?;
 
+    let mut launcher_ring = renderer::create_launcher_ring_element(backend.renderer())?;
+
+    let mut auth_glass = renderer::create_auth_glass_element(backend.renderer(), false)?;
+    let mut auth_glass_critical = renderer::create_auth_glass_element(backend.renderer(), true)?;
+
     // True frosted-glass (real background blur + tint) shader programs —
     // one per shell component, mirroring the procedural glass shaders
     // above. Each panel falls back to its procedural `*_glass` shader on
@@ -821,6 +826,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 &mut top_bar_glass,
                                 &mut launcher_glass,
                                 &mut dock_glass,
+                                &mut launcher_ring,
 
                                 bg_texture.as_ref(),
                                 &top_bar_frost,
@@ -859,12 +865,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &mut window_chrome,
                             bg_texture.as_ref(),
                             &window_frame_frost,
+                            state.focused_window.as_ref(),
                             &state.popups,
                             shell_elements,
                             std::iter::empty(),
                             &state.notifications.active,
                             top_bar_height,
                             &state.auth,
+                            &mut auth_glass,
+                            &mut auth_glass_critical,
                             current_ws,
                             &output_name,
                             state.workspace_swipe_x,
