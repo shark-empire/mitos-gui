@@ -1,5 +1,11 @@
 {
   "welcome": "Bienvenido a MITOS",
   "settings": "Ajustes",
-  "install_now": "Instalar MITOS"
+  "install_now": "Instalar MITOS",
+  "locked": "Bloqueado",
+  "incorrect_password": "Contraseña incorrecta",
+  "app_launcher": "Selector",
+  "app_files": "Archivos",
+  "app_terminal": "Terminal",
+  "app_browser": "Navegador"
 }
