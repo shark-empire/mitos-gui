@@ -1,4 +1,5 @@
 mod animation;
+mod audio;
 mod compositor;
 mod config_watcher;
 mod desktop;
@@ -17,6 +18,7 @@ mod wm;
 mod notifications;
 mod status;
 mod icons;
+mod i18n;
 mod auth;
 mod session;
 mod gestures;
@@ -198,6 +200,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
     // ============================================================
+    // CLIPBOARD / DATA DEVICE
+    // ============================================================
+
+    let data_device_state =
+        smithay::wayland::selection::data_device::DataDeviceState::new::<MitosGuiState>(
+            &display_handle,
+        );
+
+    // ============================================================
     // OUTPUT
     // ============================================================
 
@@ -298,6 +309,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         home_screen,
         dbus_service,
         session_ipc,
+        data_device_state,
     );
 
     // ============================================================
@@ -412,6 +424,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut auth_glass = renderer::create_auth_glass_element(backend.renderer(), false)?;
     let mut auth_glass_critical = renderer::create_auth_glass_element(backend.renderer(), true)?;
+
+    let mut notification_glass = renderer::create_glass_panel_element(backend.renderer())?;
 
     // True frosted-glass (real background blur + tint) shader programs —
     // one per shell component, mirroring the procedural glass shaders
@@ -870,6 +884,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             shell_elements,
                             std::iter::empty(),
                             &state.notifications.active,
+                            &mut notification_glass,
                             top_bar_height,
                             &state.auth,
                             &mut auth_glass,
