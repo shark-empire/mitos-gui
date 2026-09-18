@@ -256,7 +256,7 @@ impl SelectionHandler for MitosGuiState {
 
 impl DataDeviceHandler for MitosGuiState {
     fn data_device_state(&self) -> &DataDeviceState {
-        &mut self.data_device_state
+        &self.data_device_state
     }
 }
 
