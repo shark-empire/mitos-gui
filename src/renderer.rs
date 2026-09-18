@@ -775,9 +775,9 @@ pub fn window_frame_focus_tint_color() -> Color32F {
     let mix = 0.55 + glow * 0.25;
 
     Color32F::new(
-base.r() + (accent.r() - base.r()) * mix,
-base.g() + (accent.g() - base.g()) * mix,
-base.b() + (accent.b() - base.b()) * mix,
+base.r() + (accent.r - base.r()) * mix,
+base.g() + (accent.g - base.g()) * mix,
+base.b() + (accent.b - base.b()) * mix,
 (base.a() + glow * 0.08).min(1.0),
     )
 }
@@ -1894,9 +1894,9 @@ pub fn collect_window_glass_frame_elements(
             let accent = MitosTheme::effective_accent();
 
             tint = Color32F::new(
-                tint.r() + (accent.r() - tint.r()) * boost * 0.6,
-                tint.g() + (accent.g() - tint.g()) * boost * 0.6,
-                tint.b() + (accent.b() - tint.b()) * boost * 0.6,
+                tint.r() + (accent.r - tint.r()) * boost * 0.6,
+                tint.g() + (accent.g - tint.g()) * boost * 0.6,
+                tint.b() + (accent.b - tint.b()) * boost * 0.6,
                 (tint.a() + boost * 0.15).min(1.0),
             );
             border = Color32F::new(
