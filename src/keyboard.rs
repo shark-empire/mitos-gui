@@ -76,6 +76,8 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     keysyms::KEY_XF86AudioRaiseVolume => {
                         state.muted = false;
                         state.volume = state.volume.saturating_add(5).min(100);
+                        crate::audio::set_muted(false);
+                        crate::audio::set_volume(state.volume);
                         state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
                         state.pending_full_redraw = true;
                         return FilterResult::Intercept(());
@@ -84,6 +86,8 @@ pub fn handle_keyboard_key<B: InputBackend>(
                     keysyms::KEY_XF86AudioLowerVolume => {
                         state.muted = false;
                         state.volume = state.volume.saturating_sub(5);
+                        crate::audio::set_muted(false);
+                        crate::audio::set_volume(state.volume);
                         state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
                         state.pending_full_redraw = true;
                         return FilterResult::Intercept(());
@@ -91,6 +95,7 @@ pub fn handle_keyboard_key<B: InputBackend>(
 
                     keysyms::KEY_XF86AudioMute => {
                         state.muted = !state.muted;
+                        crate::audio::set_muted(state.muted);
                         let icon = if state.muted { crate::state::OsdIcon::Muted } else { crate::state::OsdIcon::Volume };
                         state.osd.trigger(icon, if state.muted { 0.0 } else { state.volume as f32 / 100.0 });
                         state.pending_full_redraw = true;
