@@ -475,7 +475,7 @@ pub fn remove_output(&mut self, output: &Output) {
         self.last_activity_report = Instant::now();
 
         let Some(ipc) = self.session_ipc.as_mut() else { return };
-        ipc.send(&mitos_session::ipc::Request::ReportActivity { seat_id: ipc.session_id });
+        ipc.send(&mitos_session::ipc::Request::ReportActivity { seat_id: ipc.session_id.to_string() });
     }
 
     /// Drain events/replies from mitos-session and drive the lock
