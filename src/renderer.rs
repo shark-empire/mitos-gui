@@ -1874,11 +1874,38 @@ pub fn collect_window_glass_frame_elements(
         // glow; every other window gets the normal neutral glass edge.
         // (The rare procedural-fallback path below doesn't distinguish
         // the two -- see its doc comment.)
-        let (tint, border) = if focused {
+        let (mut tint, mut border) = if focused {
             (window_frame_focus_tint_color(), window_frame_focus_border_color())
         } else {
             (window_frame_tint_color(), window_frame_border_color())
         };
+
+        // Brief "materialize" flash the moment a window is first mapped,
+        // fading out over MATERIALIZE_SECS -- purely by brightening this
+        // same ring for a moment, so a freshly-opened window reads as
+        // *arriving* rather than just popping into existence. Reuses
+        // `WindowMeta::mapped_at` (wm.rs) and applies here regardless of
+        // `focused`/client identity, same as the ring itself.
+        const MATERIALIZE_SECS: f32 = 0.45;
+        let since_mapped = crate::wm::meta(window).mapped_at.elapsed().as_secs_f32();
+        if since_mapped < MATERIALIZE_SECS {
+            let decay = 1.0 - (since_mapped / MATERIALIZE_SECS);
+            let boost = decay * decay; // eases the fade-out rather than a linear ramp-down
+            let accent = MitosTheme::effective_accent();
+
+            tint = Color32F::new(
+                tint.r + (accent.r - tint.r) * boost * 0.6,
+                tint.g + (accent.g - tint.g) * boost * 0.6,
+                tint.b + (accent.b - tint.b) * boost * 0.6,
+                (tint.a + boost * 0.15).min(1.0),
+            );
+            border = Color32F::new(
+                border.r + (1.0 - border.r) * boost,
+                border.g + (1.0 - border.g) * boost,
+                border.b + (1.0 - border.b) * boost,
+                (border.a + boost * 0.5).min(1.0),
+            );
+        }
 
         elements.push(ChromeRenderElement::Frosted(
             crate::frosted_glass::FrostedGlassElement::new(
@@ -1911,6 +1938,7 @@ pub fn collect_notification_elements(
     output_size: Size<i32, Logical>,
     top_bar_height: i32,
     scale: Scale<f64>,
+    notification_glass: &mut PixelShaderElement,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
     
@@ -1921,31 +1949,23 @@ pub fn collect_notification_elements(
     let start_x = output_size.w - panel_w - margin;
     let mut current_y = top_bar_height + margin;
 
-    for notif in notifications {
-        let bg_color = crate::theme::MitosTheme::effective_glass();
-        let bg = SolidColorBuffer::new(
-            (panel_w, panel_h),
-            Color32F::new(bg_color.r, bg_color.g, bg_color.b, bg_color.a * 0.85),
-        );
-        
-        elements.extend(bg.render_elements(
-            renderer,
-            (start_x, current_y).into(),
-            scale,
-            1.0,
-        ));
+    // A thin breathing accent edge on the leading side, replacing the
+    // old flat bottom rule -- the same "this is alive" language the
+    // windows and lock screen now use, rather than notifications being
+    // the one surface left looking static.
+    let pulse = ambient_pulse(3.5);
+    let accent = crate::theme::MitosTheme::effective_accent();
+    let edge_color = Color32F::new(accent.r, accent.g, accent.b, 0.25 + pulse * 0.25);
 
-        let border_color = crate::theme::MitosTheme::BORDER;
-        let border = SolidColorBuffer::new(
-            (panel_w, 1),
-            Color32F::new(border_color.r, border_color.g, border_color.b, border_color.a),
+    for notif in notifications {
+        notification_glass.resize(
+            Rectangle::new((start_x, current_y).into(), (panel_w, panel_h).into()),
+            None,
         );
-        elements.extend(border.render_elements(
-            renderer,
-            (start_x, current_y + panel_h - 1).into(),
-            scale,
-            1.0,
-        ));
+        elements.push(ChromeRenderElement::Glass(notification_glass.clone()));
+
+        let edge = SolidColorBuffer::new((3, panel_h), edge_color);
+        elements.extend(edge.render_elements(renderer, (start_x, current_y).into(), scale, 1.0));
 
         if let Some(tex) = &notif.title_tex {
             if let Ok(el) = tex.element(renderer, (start_x + 16, current_y + 16)) {
@@ -2267,6 +2287,7 @@ pub fn collect_frame_elements(
     shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
     overlay_elements: impl IntoIterator<Item = ChromeRenderElement>,
     notifications: &[crate::notifications::Notification],
+    notification_glass: &mut PixelShaderElement,
     top_bar_height: i32,
     auth: &crate::auth::AuthPrompt,
     auth_glass: &mut PixelShaderElement,
@@ -2342,7 +2363,7 @@ pub fn collect_frame_elements(
     // 4.5 NOTIFICATIONS (STAGE 6)
     // ------------------------------------------------------------
     elements.extend(collect_notification_elements(
-        renderer, notifications, output_size, top_bar_height, scale,
+        renderer, notifications, output_size, top_bar_height, scale, notification_glass,
     ));
 
     // ------------------------------------------------------------
