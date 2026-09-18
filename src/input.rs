@@ -14,6 +14,8 @@ use crate::state::MitosGuiState;
 use crate::gestures; 
 
 pub fn process_input_event<B: InputBackend>(state: &mut MitosGuiState, output: &Output, event: InputEvent<B>) {
+    state.report_activity();
+
     match event {
         InputEvent::Keyboard { event } => handle_keyboard_key::<B>(state, event),
         InputEvent::PointerMotionAbsolute { event } => {
