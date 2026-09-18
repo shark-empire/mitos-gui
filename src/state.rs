@@ -90,6 +90,11 @@ pub struct MitosShell {
     /// Whether the launcher is currently visible.
     pub launcher_visible: bool,
 
+    /// Set the moment the launcher opens; drives the one-shot "activation
+    /// ring" pulse in `collect_shell_elements`/`create_launcher_ring_element`.
+    /// Left alone on close — only the open transition animates.
+    pub launcher_anim: Option<crate::animation::Animation>,
+
     // --- Launcher Search State ---
     pub launcher_query: String,
     pub launcher_results: Vec<AppEntry>,
@@ -104,6 +109,7 @@ impl MitosShell {
             dock: None,
             dock_layout: crate::desktop::DockLayout::default(),
             launcher_visible: false,
+            launcher_anim: None,
             launcher_query: String::new(),
             launcher_results: Vec::new(),
             launcher_selected: 0,
@@ -131,6 +137,7 @@ impl MitosShell {
             self.launcher_query.clear();
             self.launcher_results = crate::shell_interaction::discover_apps();
             self.launcher_selected = 0;
+            self.launcher_anim = Some(crate::animation::Animation::new(Duration::from_millis(420)));
         }
     }
 }

@@ -27,6 +27,20 @@ impl Progress {
         Self(t * t * (3.0 - 2.0 * t))
     }
 
+    /// Snappier ease-out with a slight overshoot before settling — reads
+    /// as something "arriving with intent" or "powering on" rather than
+    /// just fading in. Standard easeOutBack (see easings.net); can run
+    /// briefly above `1.0` mid-curve by design (the overshoot) before
+    /// landing exactly on `1.0` — callers driving a size/extent from this
+    /// should expect that and clamp if they need a hard ceiling.
+    pub fn ease_out_back(self) -> Self {
+        let t = self.clamp().0;
+        const C1: f32 = 1.70158;
+        const C3: f32 = C1 + 1.0;
+        let t1 = t - 1.0;
+        Self(1.0 + C3 * t1 * t1 * t1 + C1 * t1 * t1)
+    }
+
     pub fn is_finished(self) -> bool {
         self.0 >= 1.0
     }
