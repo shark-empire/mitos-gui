@@ -616,6 +616,123 @@ void main() {{
     ))
 }
 
+/// Same procedural liquid-glass look as [`create_glass_panel_element`],
+/// for the authentication prompt's own background — kept as a separate
+/// function (rather than adding a tint parameter to that one and
+/// updating its three existing call sites) purely to keep this change
+/// isolated from the already-working shell panels. `critical` bakes in
+/// a reddish urgency tint instead of the normal theme glass, matching
+/// what the old flat critical-prompt border used to signal on its own.
+pub fn create_auth_glass_element(
+    renderer: &mut GlesRenderer,
+    critical: bool,
+) -> Result<PixelShaderElement, GlesError> {
+    let glass = MitosTheme::effective_glass();
+    let radius = MitosTheme::effective_panel_radius();
+
+    let (r, g, b, a) = if critical {
+        (0.30, 0.09, 0.09, 0.94)
+    } else {
+        (glass.r, glass.g, glass.b, 0.94)
+    };
+
+    let shader = format!(
+        r#"
+precision mediump float;
+
+varying vec2 v_coords;
+uniform vec2 size;
+
+const float RADIUS = {radius:.8};
+
+const vec4 TINT = vec4(
+    {r:.8},
+    {g:.8},
+    {b:.8},
+    {a:.8}
+);
+
+const float SPECULAR = {specular:.8};
+const float RIM      = {rim:.8};
+const float GRAIN    = {grain:.8};
+
+float sd_round_box(vec2 p, vec2 half_size, float r) {{
+    vec2 q = abs(p) - half_size + vec2(r);
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}}
+
+float hash(vec2 p) {{
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}}
+
+void main() {{
+    vec2 p = v_coords * size;
+    vec2 half_size = size * 0.5;
+
+    float d = sd_round_box(p - half_size, half_size, RADIUS);
+    float mask = 1.0 - smoothstep(-1.0, 1.0, d);
+
+    if (mask <= 0.001) {{
+        gl_FragColor = vec4(0.0);
+        return;
+    }}
+
+    float edge = smoothstep(-8.0, 0.0, d);
+    float inner = 1.0 - edge;
+
+    float top_light = smoothstep(0.15, 0.9, 1.0 - v_coords.y);
+
+    float sheen =
+        (sin((v_coords.x + v_coords.y * 0.7) * 6.28318) * 0.5 + 0.5);
+    sheen = smoothstep(0.6, 1.0, sheen) * 0.06;
+
+    float grain = (hash(p) - 0.5) * GRAIN;
+
+    vec3 color = TINT.rgb;
+
+    color.r += edge * 0.04;
+    color.g += edge * 0.06;
+    color.b += edge * 0.10;
+
+    color += top_light * SPECULAR * 0.30;
+    color += sheen;
+    color += edge * inner * RIM * 0.35;
+    color += grain;
+
+    float alpha = TINT.a * mask;
+    alpha = max(alpha, edge * inner * RIM * 0.45 * mask);
+
+    gl_FragColor = vec4(color, alpha);
+}}
+"#,
+        radius = radius,
+        r = r,
+        g = g,
+        b = b,
+        a = a,
+        specular = MitosTheme::effective_specular(),
+        rim = MitosTheme::LIQUID_RIM,
+        grain = MitosTheme::LIQUID_GRAIN,
+    );
+
+    let program = renderer.compile_custom_pixel_shader(
+        shader,
+        &[],
+    )?;
+
+    Ok(PixelShaderElement::new(
+        program,
+        Rectangle::new(
+            (0, 0).into(),
+            (1, 1).into(),
+        ),
+        None,
+        1.0,
+        Vec::new(),
+        Kind::Unspecified,
+    ))
+}
+
 /// Tint used for the per-window Liquid Glass frame. Deliberately the
 /// same color the shell panels use (`glass_color()`), so windows and
 /// panels read as one cohesive material rather than two different
@@ -632,6 +749,46 @@ pub fn window_frame_tint_color() -> Color32F {
 pub fn window_frame_border_color() -> Color32F {
     let c = MitosTheme::BORDER_BRIGHT;
     Color32F::new(c.r, c.g, c.b, c.a)
+}
+
+/// Continuous ambient "breathing" phase, `0.0..1.0`, cycling once every
+/// `period_secs` seconds. Driven off wall-clock time rather than a
+/// stored `Animation`, so any number of callers can read it independently
+/// without needing shared per-window animation state.
+fn ambient_pulse(period_secs: f64) -> f32 {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+
+    ((secs * std::f64::consts::TAU / period_secs).sin() as f32) * 0.5 + 0.5
+}
+
+/// Tint for the *focused* window's Liquid Glass frame: the theme accent
+/// color blended in over the normal glass, with a slow ambient pulse so
+/// the active window visibly "breathes" instead of sitting static. Only
+/// applied on the true-blur path — see `collect_window_glass_frame_elements`.
+pub fn window_frame_focus_tint_color() -> Color32F {
+    let accent = MitosTheme::effective_accent();
+    let base = glass_color();
+    let glow = ambient_pulse(4.0);
+    let mix = 0.55 + glow * 0.25;
+
+    Color32F::new(
+        base.r + (accent.r - base.r) * mix,
+        base.g + (accent.g - base.g) * mix,
+        base.b + (accent.b - base.b) * mix,
+        (base.a + glow * 0.08).min(1.0),
+    )
+}
+
+/// Border/rim color for a focused window's frame — bright accent, riding
+/// the same pulse as the tint above so the whole ring breathes together.
+pub fn window_frame_focus_border_color() -> Color32F {
+    let accent = MitosTheme::effective_accent();
+    let glow = ambient_pulse(4.0);
+
+    Color32F::new(accent.r, accent.g, accent.b, (0.55 + glow * 0.45).min(1.0))
 }
 
 /// Procedural fallback for the per-window Liquid Glass frame, used on
@@ -759,6 +916,75 @@ void main() {{
     ))
 }
 
+
+/// How large (logical px, always kept square) the launcher's one-shot
+/// "activation ring" grows to before fading out. Must match the
+/// shader's own `MAX_EXTENT` constant below.
+const LAUNCHER_RING_MAX_EXTENT: f32 = 260.0;
+
+/// A one-shot expanding accent-colored ring, played once when the
+/// launcher opens (see `MitosShell::launcher_anim` and the launcher
+/// block in `collect_shell_elements`). Reuses the same trick as
+/// `create_window_frame_element` above: the caller grows this element's
+/// own bounding box every frame via the ordinary `.resize()` call
+/// (already proven, low-risk), and the shader reads its own current
+/// `size` against `MAX_EXTENT` to know how far along it is — no custom
+/// per-frame uniform needed, so nothing here depends on exactly how
+/// `PixelShaderElement::resize`'s uniform-update argument behaves.
+pub fn create_launcher_ring_element(
+    renderer: &mut GlesRenderer,
+) -> Result<PixelShaderElement, GlesError> {
+    let accent = MitosTheme::effective_accent();
+
+    let shader = format!(
+        r#"
+precision mediump float;
+
+varying vec2 v_coords;
+uniform vec2 size;
+
+const float MAX_EXTENT = {max_extent:.8};
+
+const vec3 RING_COLOR = vec3(
+    {r:.8},
+    {g:.8},
+    {b:.8}
+);
+
+void main() {{
+    float p = clamp(size.x / MAX_EXTENT, 0.0, 1.0);
+
+    vec2 uv = v_coords * size;
+    vec2 center = size * 0.5;
+
+    float radius = size.x * 0.5 * 0.9;
+    float thickness = 2.5 + 5.0 * (1.0 - p);
+
+    float d = abs(length(uv - center) - radius) - thickness * 0.5;
+    float ring_mask = 1.0 - smoothstep(0.0, 1.5, d);
+
+    float fade = 1.0 - smoothstep(0.55, 1.0, p);
+
+    gl_FragColor = vec4(RING_COLOR, ring_mask * fade * 0.9);
+}}
+"#,
+        max_extent = LAUNCHER_RING_MAX_EXTENT,
+        r = accent.r,
+        g = accent.g,
+        b = accent.b,
+    );
+
+    let program = renderer.compile_custom_pixel_shader(shader, &[])?;
+
+    Ok(PixelShaderElement::new(
+        program,
+        Rectangle::new((0, 0).into(), (1, 1).into()),
+        None,
+        1.0,
+        Vec::new(),
+        Kind::Unspecified,
+    ))
+}
 
 // ============================================================================
 // GENERIC GLASS PANEL RENDERING
@@ -1254,6 +1480,9 @@ pub fn collect_shell_elements(
     top_bar_glass: &mut PixelShaderElement,
     launcher_glass: &mut PixelShaderElement,
     dock_glass: &mut PixelShaderElement,
+    // One-shot "activation ring" played when the launcher opens — see
+    // `create_launcher_ring_element`.
+    launcher_ring: &mut PixelShaderElement,
 
     // True frosted-glass background capture + each panel's compiled
     // frosted-glass shader program. `bg_texture` is `None` on frames
@@ -1355,6 +1584,33 @@ pub fn collect_shell_elements(
                 top_bar_shadow, top_bar_highlight, top_bar_border,
                 renderer, scale,
             ));
+
+            // One-shot "activation ring" — plays once when the launcher
+            // opens (see `MitosShell::toggle_launcher`). Purely additive
+            // on top of the panel above, so it can't disturb the panel's
+            // own geometry or the search/results layout below, both of
+            // which key off `panel.position`/`size` directly and are
+            // left completely untouched.
+            if let Some(anim) = shell.launcher_anim {
+                let progress = anim.progress(std::time::Instant::now());
+                if !progress.is_finished() {
+                    let eased = progress.ease_out_back().0.max(0.0);
+                    let extent = ((LAUNCHER_RING_MAX_EXTENT * eased) as i32).max(1);
+
+                    let cx = panel.position.0 + panel.size.0 / 2;
+                    let cy = panel.position.1 + panel.size.1 / 2;
+
+                    launcher_ring.resize(
+                        Rectangle::new(
+                            (cx - extent / 2, cy - extent / 2).into(),
+                            (extent, extent).into(),
+                        ),
+                        None,
+                    );
+
+                    elements.push(ChromeRenderElement::Glass(launcher_ring.clone()));
+                }
+            }
 
             let (px, py) = panel.position;
             let (pw, ph) = panel.size;
@@ -1586,6 +1842,7 @@ pub fn collect_window_glass_frame_elements(
     scale: Scale<f64>,
     bg: Option<(&GlesTexture, &GlesTexProgram)>,
     chrome: &mut WindowChrome,
+    focused: bool,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
 
@@ -1613,13 +1870,23 @@ pub fn collect_window_glass_frame_elements(
             .to_physical(scale)
             .to_i32_round();
 
+        // The focused window gets the accent-colored, slowly-pulsing
+        // glow; every other window gets the normal neutral glass edge.
+        // (The rare procedural-fallback path below doesn't distinguish
+        // the two -- see its doc comment.)
+        let (tint, border) = if focused {
+            (window_frame_focus_tint_color(), window_frame_focus_border_color())
+        } else {
+            (window_frame_tint_color(), window_frame_border_color())
+        };
+
         elements.push(ChromeRenderElement::Frosted(
             crate::frosted_glass::FrostedGlassElement::new(
                 Rectangle::new(phys_loc, phys_size),
                 bg_texture.clone(),
                 program.clone(),
-                window_frame_tint_color().components(),
-                window_frame_border_color().components(),
+                tint.components(),
+                border.components(),
             ),
         ));
     } else if let Some(fallback) = chrome.frame_fallback.as_mut() {
@@ -1703,6 +1970,8 @@ pub fn collect_auth_elements(
     auth: &crate::auth::AuthPrompt,
     output_size: Size<i32, Logical>,
     scale: Scale<f64>,
+    auth_glass: &mut PixelShaderElement,
+    auth_glass_critical: &mut PixelShaderElement,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
     if !auth.active { return elements; }
@@ -1715,28 +1984,33 @@ pub fn collect_auth_elements(
     let dim = SolidColorBuffer::new(output_size, Color32F::new(0.0, 0.0, 0.0, 0.6));
     elements.extend(dim.render_elements(renderer, (0, 0).into(), scale, 1.0));
 
-    let bg_color = crate::theme::MitosTheme::effective_glass();
-    let bg = SolidColorBuffer::new((w, h), Color32F::new(bg_color.r, bg_color.g, bg_color.b, 0.95));
-    elements.extend(bg.render_elements(renderer, (x, y).into(), scale, 1.0));
+    // Liquid Glass background — same procedural material as the shell
+    // panels, swapped to a reddish tint for a critical-risk prompt (see
+    // `create_auth_glass_element`). Replaces the old flat SolidColorBuffer.
+    let glass_el = if auth.critical { auth_glass_critical } else { auth_glass };
+    glass_el.resize(Rectangle::new((x, y).into(), (w, h).into()), None);
+    elements.push(ChromeRenderElement::Glass(glass_el.clone()));
 
-    // A critical-risk elevation prompt gets a red accent border instead
-    // of the usual neutral one, so it visibly reads as more urgent
-    // than a merely-elevated one before a word of the text is read.
+    // A thin glowing outline all the way around, breathing slowly — red
+    // for a critical-risk elevation prompt, accent for everything else
+    // — so it visibly reads as more urgent before a word of the text is
+    // read. Replaces the old bottom-only (plus conditional top) flat rule.
+    let pulse = ambient_pulse(3.0);
     let border = if auth.critical {
-        Color32F::new(0.75, 0.2, 0.2, 0.9)
+        Color32F::new(0.85, 0.25, 0.25, 0.6 + pulse * 0.4)
     } else {
-        let b = crate::theme::MitosTheme::BORDER;
-        Color32F::new(b.r, b.g, b.b, b.a)
+        let a = crate::theme::MitosTheme::effective_accent();
+        Color32F::new(a.r, a.g, a.b, 0.35 + pulse * 0.35)
     };
-    let border_h = if auth.critical { 2 } else { 1 };
-    let b_buf = SolidColorBuffer::new((w, border_h), border);
-    elements.extend(b_buf.render_elements(renderer, (x, y + h - border_h).into(), scale, 1.0));
-    if auth.critical {
-        // Top edge too, so the accent reads as a frame around the
-        // whole prompt rather than a rule under it.
-        let t_buf = SolidColorBuffer::new((w, border_h), border);
-        elements.extend(t_buf.render_elements(renderer, (x, y).into(), scale, 1.0));
-    }
+    let edge = 2;
+    let top_edge = SolidColorBuffer::new((w, edge), border);
+    elements.extend(top_edge.render_elements(renderer, (x, y).into(), scale, 1.0));
+    let bottom_edge = SolidColorBuffer::new((w, edge), border);
+    elements.extend(bottom_edge.render_elements(renderer, (x, y + h - edge).into(), scale, 1.0));
+    let left_edge = SolidColorBuffer::new((edge, h), border);
+    elements.extend(left_edge.render_elements(renderer, (x, y).into(), scale, 1.0));
+    let right_edge = SolidColorBuffer::new((edge, h), border);
+    elements.extend(right_edge.render_elements(renderer, (x + w - edge, y).into(), scale, 1.0));
 
     // Title ("Locked" / the requesting app's name) and subtitle (the
     // lock reason / "<action> · <risk> · <duration>") -- cached on
@@ -1768,7 +2042,26 @@ pub fn collect_auth_elements(
     let field_bg = SolidColorBuffer::new((field_w, field_h), field_bg_color);
     elements.extend(field_bg.render_elements(renderer, (field_x, field_y).into(), scale, 1.0));
 
-    let dot_color = Color32F::new(1.0, 1.0, 1.0, 1.0);
+    // While mitos-session is checking the attempt, a thin pulsing accent
+    // line under the field reads as "the system is thinking" rather than
+    // just a dimmed, static box.
+    if auth.pending {
+        let a = crate::theme::MitosTheme::effective_accent();
+        let glow = ambient_pulse(1.2);
+        let line = SolidColorBuffer::new(
+            (field_w, 2),
+            Color32F::new(a.r, a.g, a.b, 0.3 + glow * 0.5),
+        );
+        elements.extend(line.render_elements(renderer, (field_x, field_y + field_h - 2).into(), scale, 1.0));
+    }
+
+    let accent = crate::theme::MitosTheme::effective_accent();
+    let dot_color = Color32F::new(
+        0.75 + accent.r * 0.25,
+        0.75 + accent.g * 0.25,
+        0.75 + accent.b * 0.25,
+        1.0,
+    );
     let dot_size = 8;
     let dot_spacing = 16;
     
@@ -1967,12 +2260,17 @@ pub fn collect_frame_elements(
     // pairs passed into `collect_shell_elements`.
     window_frame_bg_texture: Option<&GlesTexture>,
     window_frame_frost: &GlesTexProgram,
+    // Which window (if any) currently holds keyboard focus -- drives the
+    // accent-glow variant of the glass frame in the loop below.
+    focused_window: Option<&Window>,
     _popups: &smithay::desktop::PopupManager,
     shell_elements: impl IntoIterator<Item = ChromeRenderElement>,
     overlay_elements: impl IntoIterator<Item = ChromeRenderElement>,
     notifications: &[crate::notifications::Notification],
     top_bar_height: i32,
     auth: &crate::auth::AuthPrompt,
+    auth_glass: &mut PixelShaderElement,
+    auth_glass_critical: &mut PixelShaderElement,
     current_ws: usize,
     output_name: &str,
     swipe_x: f64,
@@ -2025,6 +2323,7 @@ pub fn collect_frame_elements(
             scale,
             window_frame_bg_texture.map(|t| (t, window_frame_frost)),
             window_chrome,
+            focused_window == Some(window),
         ));
     }
 
@@ -2059,7 +2358,7 @@ pub fn collect_frame_elements(
     // ------------------------------------------------------------
     // 6. SECURE AUTHENTICATION OVERLAY
     // ------------------------------------------------------------
-    elements.extend(collect_auth_elements(renderer, auth, output_size, scale));
+    elements.extend(collect_auth_elements(renderer, auth, output_size, scale, auth_glass, auth_glass_critical));
 
     // ------------------------------------------------------------
     // 7. ON-SCREEN DISPLAY (OSD)
