@@ -342,6 +342,9 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let mut top_bar_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
     let mut launcher_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
     let mut dock_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
+    let mut launcher_ring = crate::renderer::create_launcher_ring_element(&mut renderer_rc.borrow_mut())?;
+    let mut auth_glass = crate::renderer::create_auth_glass_element(&mut renderer_rc.borrow_mut(), false)?;
+    let mut auth_glass_critical = crate::renderer::create_auth_glass_element(&mut renderer_rc.borrow_mut(), true)?;
 
     // True frosted-glass (real background blur + tint) shader programs —
     // one per shell component, mirroring the winit dev backend.
@@ -444,7 +447,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                 let shell_elements = crate::renderer::collect_shell_elements(
                     renderer, &state.shell, &state.shell.dock_layout,
                     (state.pointer_location.x, state.pointer_location.y),
-                    &mut top_bar_glass, &mut launcher_glass, &mut dock_glass,
+                    &mut top_bar_glass, &mut launcher_glass, &mut dock_glass, &mut launcher_ring,
                     bg_texture.as_ref(), &top_bar_frost, &launcher_frost, &dock_frost,
                     &top_bar_shadow, &top_bar_highlight, &top_bar_border,
                     &dock_shadow, &dock_highlight, &dock_border,
@@ -456,8 +459,10 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                 let elements = match crate::renderer::collect_frame_elements(
                     renderer, &state.space, scale, &wallpaper, output_size,
                     &mut window_chrome, bg_texture.as_ref(), &window_frame_frost,
+                    state.focused_window.as_ref(),
                     &state.popups, shell_elements, std::iter::empty(),
                     &state.notifications.active, top_bar_height, &state.auth,
+                    &mut auth_glass, &mut auth_glass_critical,
                     current_ws, &output_name, state.workspace_swipe_x, output_size.w,
                     &state.osd, state.night_light,
                 ) {
