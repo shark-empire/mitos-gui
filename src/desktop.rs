@@ -457,7 +457,7 @@ pub struct DockItem {
     pub id: &'static str,
 
     /// Human-readable application name.
-    pub name: &'static str,
+    pub name: String,
 
     /// Whether this application is currently running.
     pub running: bool,
@@ -488,31 +488,31 @@ impl Default for DockLayout {
             items: vec![
                 DockItem {
                     id: "launcher",
-                    name: "Launcher",
+                    name: crate::i18n::t("app_launcher"),
                     running: false,
                     active: false,
                 },
                 DockItem {
                     id: "files",
-                    name: "Files",
+                    name: crate::i18n::t("app_files"),
                     running: false,
                     active: false,
                 },
                 DockItem {
                     id: "terminal",
-                    name: "Terminal",
+                    name: crate::i18n::t("app_terminal"),
                     running: false,
                     active: false,
                 },
                 DockItem {
                     id: "browser",
-                    name: "Browser",
+                    name: crate::i18n::t("app_browser"),
                     running: false,
                     active: false,
                 },
                 DockItem {
                     id: "settings",
-                    name: "Settings",
+                    name: crate::i18n::t("settings"),
                     running: false,
                     active: false,
                 },
