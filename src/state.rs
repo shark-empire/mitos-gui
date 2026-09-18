@@ -233,6 +233,14 @@ pub struct MitosGuiState {
     /// support is simply unavailable in that case.
     pub session_ipc: Option<crate::session_ipc::SessionIpc>,
 
+    /// Throttle for `report_activity()` -- mitos-session's idle/lock
+    /// timers just need a periodic "still here", not a message per
+    /// input event.
+    pub last_activity_report: Instant,
+
+    /// Clipboard/selection + drag-and-drop protocol state (`wl_data_device_manager`).
+    pub data_device_state: smithay::wayland::selection::data_device::DataDeviceState,
+
 }
 
 impl MitosGuiState {
@@ -247,6 +255,7 @@ impl MitosGuiState {
         home_screen: HomeScreenConfig,
         dbus_service: crate::dbus::DbusService, // Added
         session_ipc: Option<crate::session_ipc::SessionIpc>,
+        data_device_state: smithay::wayland::selection::data_device::DataDeviceState,
     ) -> Self {
         // ------------------------------------------------------------
         // Desktop space
@@ -334,6 +343,8 @@ impl MitosGuiState {
             pending_screenshot: false,
             dbus_service: Some(dbus_service),
             session_ipc,
+            last_activity_report: Instant::now(),
+            data_device_state,
         }
     }
 
@@ -439,6 +450,32 @@ pub fn remove_output(&mut self, output: &Output) {
                 self.pending_full_redraw = true;
             }
         }
+    }
+
+    /// Tell mitos-session the user is still active, throttled so this
+    /// fires on a timer rather than once per input event -- idle/lock
+    /// timers just need a periodic "still here", not a continuous
+    /// stream. Called from `input.rs`'s `process_input_event`, the one
+    /// choke point every keyboard/pointer/gesture event already passes
+    /// through.
+    ///
+    /// NOTE: `Request::ReportActivity`'s `seat_id` field type wasn't
+    /// something I could check against mitos-session's own source from
+    /// here (that crate isn't part of this project) -- this assumes a
+    /// `u32`, matching the convention `session_id` already uses
+    /// elsewhere in the same `Request` enum, and reuses this
+    /// connection's own `session_id` as the seat id (reasonable for a
+    /// single-seat desktop, which is the only case mitos-gui runs
+    /// under today). Worth a quick check against
+    /// mitos-session's `ipc/messages.rs` before trusting this compiles.
+    pub fn report_activity(&mut self) {
+        if self.last_activity_report.elapsed() < Duration::from_secs(15) {
+            return;
+        }
+        self.last_activity_report = Instant::now();
+
+        let Some(ipc) = self.session_ipc.as_mut() else { return };
+        ipc.send(&mitos_session::ipc::Request::ReportActivity { seat_id: ipc.session_id });
     }
 
     /// Drain events/replies from mitos-session and drive the lock
