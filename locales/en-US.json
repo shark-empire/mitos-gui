@@ -1,5 +1,11 @@
 {
   "welcome": "Welcome to MITOS",
   "settings": "Settings",
-  "install_now": "Install MITOS"
+  "install_now": "Install MITOS",
+  "locked": "Locked",
+  "incorrect_password": "Incorrect password",
+  "app_launcher": "Launcher",
+  "app_files": "Files",
+  "app_terminal": "Terminal",
+  "app_browser": "Browser"
 }
