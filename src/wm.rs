@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
+use std::time::Instant;
 
 use smithay::desktop::Window;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -33,6 +34,13 @@ pub struct WindowMeta {
     pub fullscreen: bool,
     /// Maps Output Name -> Workspace ID (Independent workspaces per monitor)
     pub workspace: HashMap<String, usize>,
+    /// When this window's metadata was first created -- effectively "when
+    /// it was mapped", since `meta()` lazily creates this on first access
+    /// and the first access happens right at map time in
+    /// `compositor.rs::new_toplevel`. Drives a brief "materialize" glow
+    /// on the window's glass frame (`renderer::collect_window_glass_frame_elements`)
+    /// rather than the window just popping into existence.
+    pub mapped_at: Instant,
 }
 
 impl Default for WindowMeta {
@@ -42,6 +50,7 @@ impl Default for WindowMeta {
             maximized: false,
             fullscreen: false,
             workspace: HashMap::new(),
+            mapped_at: Instant::now(),
         }
     }
 }
