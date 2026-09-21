@@ -468,7 +468,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                     &state.notifications.active, &mut notification_glass, top_bar_height, &state.auth,
                     &mut auth_glass, &mut auth_glass_critical,
                     current_ws, &output_name, state.workspace_swipe_x, output_size.w,
-                    &state.osd, state.night_light,
+                    &state.osd, state.night_light,&Animation,
                 ) {
                     Ok(e) => e,
                     Err(err) => { tracing::warn!("MITOS GUI: frame build error: {err}"); continue; }
