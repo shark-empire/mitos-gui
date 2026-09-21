@@ -202,6 +202,7 @@ pub struct MitosGuiState {
     pub battery: Option<crate::status::BatteryStatus>,
     pub volume: u8,
     pub muted: bool,
+    pub brightness: u8,
     pub last_status_poll: Instant,
 
     /// Set by the DRM vblank handler; consumed by the DRM main loop.
@@ -222,6 +223,11 @@ pub struct MitosGuiState {
     // ------------------------------------------------------------------------
     pub osd: OsdState,
     pub night_light: bool,
+    /// Drives the night-light tint's fade in/out; restarted every time
+    /// `toggle_night_light` flips the setting. A zero-duration `Animation`
+    /// (its initial value, and its state right after any transition
+    /// finishes) reads as "already settled" -- see `Animation::progress`.
+    pub night_light_anim: crate::animation::Animation,
     pub hot_corners_last_triggered: Instant,
 
     pub pending_screenshot: bool,
@@ -329,6 +335,7 @@ impl MitosGuiState {
             battery: None,
             volume: 70,
             muted: false,
+            brightness: 100,
             last_status_poll: Instant::now(),
             drm_vblank: false,
             auth: crate::auth::AuthPrompt::new(),
@@ -338,6 +345,7 @@ impl MitosGuiState {
             // Stage 7 Features
             osd: OsdState::new(),
             night_light: initial_night_light,
+            night_light_anim: crate::animation::Animation::new(Duration::ZERO),
             hot_corners_last_triggered: Instant::now() - Duration::from_secs(1),
 
             pending_screenshot: false,
@@ -351,6 +359,9 @@ impl MitosGuiState {
     /// Toggle the Night Light (Eye Comfort) mode.
     pub fn toggle_night_light(&mut self) {
         self.night_light = !self.night_light;
+        self.night_light_anim = crate::animation::Animation::new(
+            Duration::from_millis(crate::theme::MitosTheme::ANIMATION_MS),
+        );
         self.pending_full_redraw = true;
         println!("MITOS GUI: Night Light {}", if self.night_light { "enabled" } else { "disabled" });
     }
@@ -385,23 +396,14 @@ impl MitosGuiState {
         // Sync night light state if it was changed externally by mitos-settings
         if self.home_screen.night_light != old_config.night_light {
             self.night_light = self.home_screen.night_light;
+            self.night_light_anim = crate::animation::Animation::new(
+                Duration::from_millis(crate::theme::MitosTheme::ANIMATION_MS),
+            );
         }
 
         crate::theme::MitosTheme::apply_runtime(&self.home_screen);
 
-        let output_size = self
-            .outputs
-            .first()
-            .and_then(|o| o.current_mode())
-            .map(|mode| {
-                smithay::utils::Size::<i32, smithay::utils::Logical>::from((
-                    mode.size.w,
-                    mode.size.h,
-                ))
-            })
-            .unwrap_or_else(|| {
-                smithay::utils::Size::<i32, smithay::utils::Logical>::new(1280, 720)
-            });
+        let output_size = crate::wm::output_size(self);
 
         self.shell.update_layout(&self.home_screen, output_size);
         self.pending_full_redraw = true;

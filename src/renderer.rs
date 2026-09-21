@@ -124,18 +124,21 @@ impl GlassPanel {
             (0, 0),
             (width, height),
             MitosTheme::effective_panel_radius(),
-            glass_color(),
+            top_bar_color(),
         )
     }
 
-    /// Create the MITOS launcher.
+    /// Create the MITOS launcher, centered within `(screen_width,
+    /// screen_height)` at the given `(width, height)` -- sized by the
+    /// caller (`desktop::ShellLayout::calculate`) from the configured
+    /// `launcher_width`/`launcher_height`, since those are adjustable
+    /// via home.conf and shouldn't be overridden by a fixed size here.
     pub fn launcher(
         screen_width: i32,
         screen_height: i32,
+        width: i32,
+        height: i32,
     ) -> Self {
-        let width = 720;
-        let height = 480;
-
         let x = ((screen_width - width) / 2).max(0);
         let y = ((screen_height - height) / 2).max(0);
 
@@ -191,20 +194,20 @@ pub struct DesktopBackground {
 }
 
 impl DesktopBackground {
+    /// Solid by default; becomes a two-stop gradient when home.conf sets
+    /// `background_gradient_bottom` (the loaded `background` key is then
+    /// the top stop).
     pub fn from_home_screen(
         home_screen: &HomeScreenConfig,
     ) -> Self {
-        let c = home_screen.background;
+        let top = home_screen.background;
 
-        Self {
-            mode: BackgroundMode::Solid(
-                Color32F::new(
-                    c.r,
-                    c.g,
-                    c.b,
-                    c.a,
-                ),
+        match home_screen.background_gradient_bottom {
+            Some(bottom) => Self::gradient(
+                Color32F::new(top.r, top.g, top.b, top.a),
+                Color32F::new(bottom.r, bottom.g, bottom.b, bottom.a),
             ),
+            None => Self::solid(Color32F::new(top.r, top.g, top.b, top.a)),
         }
     }
 
@@ -398,14 +401,20 @@ impl Wallpaper {
 pub fn background_color(
     home_screen: &HomeScreenConfig,
 ) -> Color32F {
-    let c = home_screen.background;
+    match DesktopBackground::from_home_screen(home_screen).mode {
+        BackgroundMode::Solid(c) => c,
 
-    Color32F::new(
-        c.r,
-        c.g,
-        c.b,
-        c.a,
-    )
+        // No true gradient fill in the clear-color pipeline yet -- that
+        // would need a full-screen shader, like the glass panels have.
+        // Average the two stops so a configured gradient still shows up
+        // as *something* rather than being silently ignored.
+        BackgroundMode::Gradient { top, bottom } => Color32F::new(
+            (top.r() + bottom.r()) / 2.0,
+            (top.g() + bottom.g()) / 2.0,
+            (top.b() + bottom.b()) / 2.0,
+            (top.a() + bottom.a()) / 2.0,
+        ),
+    }
 }
 
 pub fn clear_color(
@@ -1296,9 +1305,16 @@ impl ShellTextState {
         let mut changed = false;
 
         // --------------------------------------------------------
-        // Top bar clock (changes once per minute)
+        // Top bar clock (changes once per minute -- the date portion
+        // only actually varies once a day, but folding both into one
+        // string keeps this to the single cached texture it already
+        // was, re-rasterized only on the minute boundary either way)
         // --------------------------------------------------------
-        let now = crate::shell_interaction::current_time_string();
+        let now = format!(
+            "{}  {}",
+            crate::shell_interaction::current_date_string(),
+            crate::shell_interaction::current_time_string(),
+        );
 
         if now != self.clock_string {
             self.clock_string = now.clone();
@@ -1464,6 +1480,38 @@ impl TrayState {
 // COMPLETE MITOS SHELL
 // ============================================================================
 
+/// Deterministic placeholder color for a launcher result row, standing in
+/// for real icon-theme lookup -- MITOS doesn't parse/rasterize `.desktop`
+/// icon themes yet, so each app gets a stable, distinct color swatch
+/// instead of every row looking identical.
+fn icon_swatch_color(key: &str) -> (f32, f32, f32) {
+    let mut hash: u32 = 2166136261;
+    for b in key.bytes() {
+        hash ^= b as u32;
+        hash = hash.wrapping_mul(16777619);
+    }
+
+    hsv_to_rgb((hash % 360) as f32, 0.45, 0.85)
+}
+
+/// Minimal HSV -> RGB conversion (`s`, `v` in 0.0..=1.0, `h` in degrees).
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+
+    let (r, g, b) = match h as u32 {
+        0..=59 => (c, x, 0.0),
+        60..=119 => (x, c, 0.0),
+        120..=179 => (0.0, c, x),
+        180..=239 => (0.0, x, c),
+        240..=299 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+
+    (r + m, g + m, b + m)
+}
+
 /// Collect every visible MITOS shell element.
 ///
 /// Shell order:
@@ -1522,8 +1570,13 @@ pub fn collect_shell_elements(
             renderer, scale,
         ));
 
+        // Right-edge margin: inset by the panel's own corner radius so
+        // the clock/tray content clears the rounded corner curve instead
+        // of a fixed guess at how much that curve eats into the corner.
+        let edge_margin = panel.radius.round() as i32;
+
         if let Some(clock) = text.clock_texture.as_ref() {
-            let x = panel.position.0 + panel.size.0 - clock.size.w - 12;
+            let x = panel.position.0 + panel.size.0 - clock.size.w - edge_margin;
             let y = panel.position.1 + (panel.size.1 - clock.size.h) / 2;
 
             if let Ok(el) = clock.element(renderer, (x, y)) {
@@ -1538,7 +1591,7 @@ pub fn collect_shell_elements(
             .unwrap_or(0);
 
         let mut x = panel.position.0 + panel.size.0
-            - 12 - clock_w - 16 - tray.total_width();
+            - edge_margin - clock_w - 16 - tray.total_width();
 
         let cy = panel.position.1 + panel.size.1 / 2;
 
@@ -1555,7 +1608,7 @@ pub fn collect_shell_elements(
 
                 // Workspace Dots (Centered in top bar)
         let dot_size = 6;
-        let dot_spacing = 12;
+        let dot_spacing = crate::theme::MitosTheme::SPACING as i32;
         let total_dots_w = (workspace_count as i32 * dot_size) + ((workspace_count as i32 - 1) * dot_spacing);
         let mut dot_x = panel.position.0 + (panel.size.0 / 2) - (total_dots_w / 2);
         let dot_y = panel.position.1 + (panel.size.1 / 2) - (dot_size / 2);
@@ -1649,8 +1702,27 @@ pub fn collect_shell_elements(
                     ));
                 }
 
+                // Icon swatch: stands in for real icon-theme resolution
+                // (see `icon_swatch_color`) so results are distinguishable
+                // at a glance instead of being text-only rows.
+                if let Some(app) = shell.launcher_results.get(i) {
+                    let key = if app.icon.is_empty() { &app.name } else { &app.icon };
+                    let (r, g, b) = icon_swatch_color(key);
+
+                    let icon_buf = SolidColorBuffer::new(
+                        (20, 20),
+                        Color32F::new(r, g, b, 0.85),
+                    );
+                    elements.extend(icon_buf.render_elements(
+                        renderer,
+                        (px + 16, row_y + 8).into(),
+                        scale,
+                        1.0,
+                    ));
+                }
+
                 if let Some(t) = tex {
-                    if let Ok(el) = t.element(renderer, (px + 24, row_y + 6)) {
+                    if let Ok(el) = t.element(renderer, (px + 44, row_y + 6)) {
                         elements.push(ChromeRenderElement::Buffer(el));
                     }
                 }
@@ -1747,7 +1819,9 @@ impl WindowChrome {
             return;
         }
 
-        let img = generate_shadow_image(sw, sh, 16.0, 8.0, (0, 0, 0, 180));
+        let img = generate_shadow_image(
+            sw, sh, crate::theme::MitosTheme::SHADOW_RADIUS, 8.0, (0, 0, 0, 180),
+        );
         let size = Size::<i32, Logical>::new(sw, sh);
         let buffer_size = Size::<i32, Buffer>::from((sw, sh));
 
@@ -1803,7 +1877,12 @@ pub fn collect_window_chrome_elements(
     chrome.ensure_shadow(geo.size.w, geo.size.h);
     if let Some(buf) = &chrome.shadow_buffer {
         let pad = 24;
-        let shadow_loc = Point::from((location.x - pad, location.y - pad));
+        // A slight directional drop -- light reads as coming from above,
+        // rather than a shadow spread evenly on all sides.
+        let shadow_loc = Point::from((
+            location.x - pad + crate::theme::MitosTheme::SHADOW_OFFSET_X as i32,
+            location.y - pad + crate::theme::MitosTheme::SHADOW_OFFSET_Y as i32,
+        ));
         
         if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
             renderer,
@@ -1893,17 +1972,20 @@ pub fn collect_window_glass_frame_elements(
             let boost = decay * decay; // eases the fade-out rather than a linear ramp-down
             let accent = MitosTheme::effective_accent();
 
+            let lerp = crate::animation::lerp;
+            let p = crate::animation::Progress;
+
             tint = Color32F::new(
-                tint.r() + (accent.r - tint.r()) * boost * 0.6,
-                tint.g() + (accent.g - tint.g()) * boost * 0.6,
-                tint.b() + (accent.b - tint.b()) * boost * 0.6,
-                (tint.a() + boost * 0.15).min(1.0),
+                lerp(tint.r(), accent.r, p(boost * 0.6)),
+                lerp(tint.g(), accent.g, p(boost * 0.6)),
+                lerp(tint.b(), accent.b, p(boost * 0.6)),
+                lerp(tint.a(), 1.0, p(boost * 0.15)),
             );
             border = Color32F::new(
-                border.r() + (1.0 - border.r()) * boost,
-                border.g() + (1.0 - border.g()) * boost,
-                border.b() + (1.0 - border.b()) * boost,
-                (border.a() + boost * 0.5).min(1.0),
+                lerp(border.r(), 1.0, p(boost)),
+                lerp(border.g(), 1.0, p(boost)),
+                lerp(border.b(), 1.0, p(boost)),
+                lerp(border.a(), 1.0, p(boost * 0.5)),
             );
         }
 
@@ -1958,6 +2040,23 @@ pub fn collect_notification_elements(
     let edge_color = Color32F::new(accent.r, accent.g, accent.b, 0.25 + pulse * 0.25);
 
     for notif in notifications {
+        // Soft shadow beneath the toast so it reads as floating above
+        // the desktop, matching the depth language the shell panels
+        // already have (`shadow_color()` / `collect_glass_panel_elements`)
+        // -- toasts just never got their own shadow, since they're built
+        // fresh each frame instead of sharing a persistent buffer.
+        let soft = crate::theme::MitosTheme::SHADOW_SOFT;
+        let shadow = SolidColorBuffer::new(
+            (panel_w, panel_h),
+            Color32F::new(soft.r, soft.g, soft.b, soft.a),
+        );
+        elements.extend(shadow.render_elements(
+            renderer,
+            (start_x + 3, current_y + 4).into(),
+            scale,
+            1.0,
+        ));
+
         notification_glass.resize(
             Rectangle::new((start_x, current_y).into(), (panel_w, panel_h).into()),
             None,
@@ -2151,7 +2250,12 @@ pub fn collect_osd_elements(
     let bg_color = crate::theme::MitosTheme::effective_glass();
     let bg = SolidColorBuffer::new(
         (pill_w, pill_h),
-        Color32F::new(bg_color.r, bg_color.g, bg_color.b, bg_color.a * 0.95),
+        Color32F::new(
+            bg_color.r,
+            bg_color.g,
+            bg_color.b,
+            crate::theme::MitosTheme::effective_glass_alpha() * 0.95,
+        ),
     );
     elements.extend(bg.render_elements(renderer, (x, y).into(), scale, 1.0));
 
@@ -2200,13 +2304,25 @@ pub fn collect_osd_elements(
 pub fn collect_night_light_elements(
     renderer: &mut GlesRenderer,
     night_light: bool,
+    anim: &crate::animation::Animation,
     output_size: Size<i32, Logical>,
     scale: Scale<f64>,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
-    if !night_light { return elements; }
 
-    let night_tint = Color32F::new(1.0, 0.75, 0.45, 0.15); 
+    let now = std::time::Instant::now();
+
+    // Once the fade has settled and the filter is off, there's nothing to
+    // draw -- skip the eased-alpha computation below entirely rather than
+    // spending it on a tint nobody will see.
+    if !night_light && anim.finished(now) {
+        return elements;
+    }
+
+    let progress = anim.progress(now).ease_in_out().0;
+    let alpha = if night_light { progress } else { 1.0 - progress };
+
+    let night_tint = Color32F::new(1.0, 0.75, 0.45, 0.15 * alpha);
     let tint_buf = SolidColorBuffer::new(output_size, night_tint);
     elements.extend(tint_buf.render_elements(renderer, (0, 0).into(), scale, 1.0));
     
@@ -2298,6 +2414,7 @@ pub fn collect_frame_elements(
     output_width: i32,
     osd: &crate::state::OsdState,
     night_light: bool,
+    night_light_anim: &crate::animation::Animation,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
@@ -2369,7 +2486,7 @@ pub fn collect_frame_elements(
     // ------------------------------------------------------------
     // 4.6 NIGHT LIGHT (EYE COMFORT)
     // ------------------------------------------------------------
-    elements.extend(collect_night_light_elements(renderer, night_light, output_size, scale));
+    elements.extend(collect_night_light_elements(renderer, night_light, night_light_anim, output_size, scale));
 
     // ------------------------------------------------------------
     // 5. MITOS OVERLAYS (Launcher, etc.)
@@ -2387,13 +2504,4 @@ pub fn collect_frame_elements(
     elements.extend(collect_osd_elements(renderer, osd, output_size, scale));
 
     Ok(elements)
-}
-
-/// Render the top bar clock text (placeholder - real text rendering needs font support).
-pub fn render_top_bar_clock(
-    _renderer: &mut GlesRenderer,
-    _panel: &GlassPanel,
-    _scale: Scale<f64>,
-) -> Vec<ChromeRenderElement> {
-    Vec::new()
 }

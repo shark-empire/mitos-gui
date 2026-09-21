@@ -17,6 +17,13 @@ impl Color {
     pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
+
+    /// Convert to the `(u8, u8, u8, u8)` form the text rasterizer
+    /// (`crate::text::TextRenderer::render`) takes its color in.
+    pub fn to_u8(self) -> (u8, u8, u8, u8) {
+        let ch = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        (ch(self.r), ch(self.g), ch(self.b), ch(self.a))
+    }
 }
 
 pub struct MitosTheme;
@@ -132,9 +139,10 @@ impl MitosTheme {
 
     /// Effective specular respecting runtime theme.
     pub fn effective_specular() -> f32 {
-        match Self::runtime() {
-            Some(rt) if !rt.dark_mode => Self::LIQUID_SPECULAR * 0.8,
-            _ => Self::LIQUID_SPECULAR,
+        if Self::is_dark_mode() {
+            Self::LIQUID_SPECULAR
+        } else {
+            Self::LIQUID_SPECULAR * 0.8
         }
     }
 
@@ -210,6 +218,15 @@ impl MitosTheme {
         Self::runtime()
             .map(|rt| rt.glass_tint)
             .unwrap_or(Self::GLASS)
+    }
+
+    /// Get the effective glass opacity on its own (runtime override or
+    /// default), for callers that only need the alpha channel rather
+    /// than the full tint color.
+    pub fn effective_glass_alpha() -> f32 {
+        Self::runtime()
+            .map(|rt| rt.glass_alpha)
+            .unwrap_or(Self::GLASS.a)
     }
 
     /// Get the effective accent color (runtime override or default).

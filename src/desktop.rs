@@ -32,6 +32,11 @@ pub struct HomeScreenConfig {
     /// Desktop background color.
     pub background: Color,
 
+    /// Optional bottom stop for a two-color gradient background. When
+    /// set, `background` is the top stop; when absent, the background
+    /// is the flat `background` color as before.
+    pub background_gradient_bottom: Option<Color>,
+
     /// Whether the top bar is visible.
     pub top_bar: bool,
 
@@ -76,6 +81,7 @@ impl Default for HomeScreenConfig {
     fn default() -> Self {
         Self {
             background: MitosTheme::BACKGROUND,
+            background_gradient_bottom: None,
 
             top_bar: true,
             top_bar_height: MitosTheme::TOP_BAR_HEIGHT,
@@ -152,6 +158,18 @@ impl HomeScreenConfig {
                     }
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: invalid color {value:?}, keeping default",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                // Optional second stop -- when present, `background` is
+                // treated as the top of a two-color gradient instead of
+                // a flat fill. Same hex format as `background`.
+                "background_gradient_bottom" => match parse_hex_color(value) {
+                    Some(color) => config.background_gradient_bottom = Some(color),
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: invalid color {value:?}, ignoring",
                         path.display(),
                         line_no + 1,
                     ),
@@ -380,21 +398,7 @@ impl ShellLayout {
                 .max(1.0)
                 .round() as i32;
 
-            let x = ((width - launcher_width) / 2).max(0);
-            let y = ((height - launcher_height) / 2).max(0);
-
-            Some(GlassPanel {
-                position: (x, y),
-                size: (launcher_width, launcher_height),
-                radius: MitosTheme::effective_panel_radius(),
-                tint: crate::renderer::glass_color(),
-                border: Color32F::new(
-                    MitosTheme::BORDER.r,
-                    MitosTheme::BORDER.g,
-                    MitosTheme::BORDER.b,
-                    MitosTheme::BORDER.a,
-                ),
-            })
+            Some(GlassPanel::launcher(width, height, launcher_width, launcher_height))
         } else {
             None
         };
@@ -403,6 +407,10 @@ impl ShellLayout {
         // Dock
         //
         // Floating glass dock centered horizontally near the bottom.
+        // Width is a fraction of the screen, but never shrinks past
+        // what the configured dock items actually need (icons + spacing
+        // + padding) -- that floor only bites with more items than the
+        // default 5, so it's a no-op for the default dock.
         // ------------------------------------------------------------
 
         let dock = if config.dock {
@@ -412,8 +420,19 @@ impl ShellLayout {
                 .min(height as f32)
                 .round() as i32;
 
+            let content = DockLayout::default();
+            let item_count = content.items.len() as f32;
+            let content_width = if item_count > 0.0 {
+                item_count * content.icon_size as f32
+                    + (item_count - 1.0).max(0.0) * content.spacing as f32
+                    + 2.0 * content.padding as f32
+            } else {
+                0.0
+            };
+
             let dock_width = ((width as f32) * 0.55)
                 .max(360.0)
+                .max(content_width)
                 .min(width as f32 - 32.0)
                 .round() as i32;
 

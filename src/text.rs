@@ -126,14 +126,14 @@ impl TextRenderer {
                 let (r, g, b, a) = rgba;
                 let alpha = (cov as u32 * a as u32 / 255) as u8;
 
-                let X = ox + px as i32;
-                let Y = oy + py as i32;
+                let x = ox + px as i32;
+                let y = oy + py as i32;
 
-                if X < 0 || Y < 0 || X >= width || Y >= height {
+                if x < 0 || y < 0 || x >= width || y >= height {
                     return;
                 }
 
-                let p = img.get_pixel_mut(X as u32, Y as u32);
+                let p = img.get_pixel_mut(x as u32, y as u32);
 
                 if alpha > p[3] {
                     *p = image::Rgba([r, g, b, alpha]);

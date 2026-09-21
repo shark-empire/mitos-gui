@@ -68,6 +68,10 @@ impl Animation {
 
         let elapsed = now.saturating_duration_since(self.started);
 
+        if elapsed.is_zero() {
+            return Progress::ZERO;
+        }
+
         Progress((elapsed.as_secs_f32() / self.duration.as_secs_f32()).min(1.0))
     }
 

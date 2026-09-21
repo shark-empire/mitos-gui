@@ -21,9 +21,21 @@ use crate::state::MitosGuiState;
 
 /// Launch an application by its dock ID, trying common fallback binaries.
 pub fn launch_app(state: &mut MitosGuiState, id: &str) {
+    // Human-readable name for logging/notifications, e.g. "Terminal"
+    // instead of "terminal" -- falls back to the raw id for anything
+    // not in the dock (there isn't one to look up).
+    let display_name = state
+        .shell
+        .dock_layout
+        .items
+        .iter()
+        .find(|item| item.id == id)
+        .map(|item| item.name.clone())
+        .unwrap_or_else(|| id.to_string());
+
     let result = match id {
         "launcher" => {
-            state.shell.toggle_launcher();
+            crate::keyboard::toggle_launcher(state);
             return;
         }
         "files" => try_launch(&[
@@ -55,8 +67,15 @@ pub fn launch_app(state: &mut MitosGuiState, id: &str) {
     };
 
     match result {
-        Ok(()) => tracing::info!("MITOS GUI: launched {id}"),
-        Err(err) => tracing::warn!("MITOS GUI: failed to launch {id}: {err}"),
+        Ok(()) => tracing::info!("MITOS GUI: launched {display_name}"),
+        Err(err) => {
+            tracing::warn!("MITOS GUI: failed to launch {display_name}: {err}");
+            state.notifications.push(
+                "MITOS",
+                "Couldn't open app",
+                &format!("{display_name} isn't installed"),
+            );
+        }
     }
 }
 

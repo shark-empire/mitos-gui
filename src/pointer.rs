@@ -291,8 +291,7 @@ pub fn check_hot_corners(
 
     // Top-Left: Open Launcher
     if x < threshold && y < threshold && !state.shell.launcher_visible {
-        state.shell.toggle_launcher();
-        state.pending_full_redraw = true;
+        crate::keyboard::toggle_launcher(state);
         state.hot_corners_last_triggered = Instant::now();
     }
     

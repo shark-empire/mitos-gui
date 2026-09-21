@@ -1,5 +1,6 @@
 mod animation;
 mod audio;
+mod brightness;
 mod compositor;
 mod config_watcher;
 mod desktop;
@@ -282,12 +283,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Apply initial runtime theme overrides
     theme::MitosTheme::apply_runtime(&home_screen);
 
+    {
+        let bg = theme::MitosTheme::effective_background();
+        tracing::info!(
+            "MITOS GUI: theme resolved -- dark_mode={}, background=({:.3}, {:.3}, {:.3})",
+            theme::MitosTheme::is_dark_mode(), bg.r, bg.g, bg.b,
+        );
+    }
+
     // ============================================================
     // D-BUS NOTIFICATION SERVICE
     // ============================================================
 
     let dbus_service = dbus::DbusService::new()
         .expect("Failed to start D-Bus notification service");
+
+    tracing::info!(
+        "MITOS GUI: D-Bus notifications connected as {:?}",
+        dbus_service.conn.unique_name(),
+    );
 
     // ============================================================
     // MITOS-SESSION IPC (lock screen, session lifecycle)
@@ -895,6 +909,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             output_size.w,
                             &state.osd,
                             state.night_light,
+                            &state.night_light_anim,
                         )?;
 
                         // ------------------------------------------------

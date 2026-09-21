@@ -12,6 +12,7 @@
 use smithay::{
     desktop::{Space, Window},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Logical, Rectangle},
     wayland::seat::WaylandFocus,
 };
 
@@ -25,11 +26,13 @@ pub fn window_for_surface(space: &Space<Window>, surface: &WlSurface) -> Option<
 
 /// Picks a location for a newly-created window.
 ///
-/// There's no real window manager yet (that's Stage 4), so this just
-/// cascades new windows down and to the right a bit so they don't all
-/// land in a single stack at (0, 0).
-pub fn next_window_position(space: &Space<Window>) -> (i32, i32) {
+/// There's no per-window placement policy yet (drag-to-move/resize is
+/// handled in `wm.rs`, Stage 4), so this just cascades new windows down
+/// and to the right a bit so they don't all land in a single stack --
+/// starting from `usable`'s top-left rather than the output's, so a
+/// freshly-mapped window doesn't spawn underneath the top bar.
+pub fn next_window_position(space: &Space<Window>, usable: Rectangle<i32, Logical>) -> (i32, i32) {
     const STEP: i32 = 24;
     let n = space.elements().count() as i32;
-    (n * STEP, n * STEP)
+    (usable.loc.x + n * STEP, usable.loc.y + n * STEP)
 }

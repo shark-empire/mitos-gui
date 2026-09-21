@@ -21,6 +21,16 @@ pub struct Notification {
     pub body_tex: Option<TextTexture>,
 }
 
+/// Toasts visible on screen at once. Past this, `push` dismisses the
+/// oldest to make room -- otherwise a burst of notifications (a noisy
+/// app, or several D-Bus clients firing close together) could stack up
+/// and cover the whole screen.
+const MAX_VISIBLE: usize = 4;
+
+/// Dismissed/expired notifications kept for a future Notification
+/// Center. Bounded so a long uptime can't grow this without limit.
+const MAX_HISTORY: usize = 50;
+
 pub struct NotificationManager {
     pub active: Vec<Notification>,
     pub history: Vec<Notification>, // For future Notification Center
@@ -40,9 +50,11 @@ impl NotificationManager {
 
     /// Push a new notification to the screen.
     pub fn push(&mut self, app_name: &str, title: &str, body: &str) {
-        let title_tex = self.text_renderer.render(title, 16.0, (255, 255, 255, 255))
+        let title_tex = self.text_renderer
+            .render(title, 16.0, crate::theme::MitosTheme::TEXT.to_u8())
             .and_then(TextTexture::from_rgba);
-        let body_tex = self.text_renderer.render(body, 14.0, (200, 200, 200, 255))
+        let body_tex = self.text_renderer
+            .render(body, 14.0, crate::theme::MitosTheme::TEXT_MUTED.to_u8())
             .and_then(TextTexture::from_rgba);
 
         let notif = Notification {
@@ -58,13 +70,36 @@ impl NotificationManager {
         
         self.next_id += 1;
         self.active.push(notif);
+
+        // Keep at most MAX_VISIBLE toasts on screen -- dismiss (and
+        // archive) the oldest to make room for this one.
+        if self.active.len() > MAX_VISIBLE {
+            if let Some(oldest_id) = self.active.first().map(|n| n.id) {
+                self.dismiss(oldest_id);
+            }
+        }
     }
 
     /// Manually dismiss a notification (e.g., user clicks it).
     pub fn dismiss(&mut self, id: u32) {
         if let Some(pos) = self.active.iter().position(|n| n.id == id) {
             let n = self.active.remove(pos);
-            self.history.push(n);
+            self.archive(n);
+        }
+    }
+
+    /// Move a notification into bounded history -- whether it got there
+    /// by manual dismissal, capacity eviction, or expiring on its own.
+    fn archive(&mut self, n: Notification) {
+        tracing::debug!(
+            "MITOS GUI: notification archived: [{}] {} - {}",
+            n.app_name, n.title, n.body,
+        );
+
+        self.history.push(n);
+
+        if self.history.len() > MAX_HISTORY {
+            self.history.remove(0);
         }
     }
 
@@ -73,7 +108,17 @@ impl NotificationManager {
     pub fn tick(&mut self) -> bool {
         let now = Instant::now();
         let before = self.active.len();
-        self.active.retain(|n| now.duration_since(n.created_at).as_secs() < n.duration_secs);
+
+        let mut i = 0;
+        while i < self.active.len() {
+            if now.duration_since(self.active[i].created_at).as_secs() < self.active[i].duration_secs {
+                i += 1;
+            } else {
+                let n = self.active.remove(i);
+                self.archive(n);
+            }
+        }
+
         self.active.len() != before
     }
 }

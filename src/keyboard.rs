@@ -102,6 +102,22 @@ pub fn handle_keyboard_key<B: InputBackend>(
                         return FilterResult::Intercept(());
                     }
 
+                    keysyms::KEY_XF86MonBrightnessUp => {
+                        state.brightness = state.brightness.saturating_add(5).min(100);
+                        crate::brightness::set_brightness(state.brightness);
+                        state.osd.trigger(crate::state::OsdIcon::Brightness, state.brightness as f32 / 100.0);
+                        state.pending_full_redraw = true;
+                        return FilterResult::Intercept(());
+                    }
+
+                    keysyms::KEY_XF86MonBrightnessDown => {
+                        state.brightness = state.brightness.saturating_sub(5);
+                        crate::brightness::set_brightness(state.brightness);
+                        state.osd.trigger(crate::state::OsdIcon::Brightness, state.brightness as f32 / 100.0);
+                        state.pending_full_redraw = true;
+                        return FilterResult::Intercept(());
+                    }
+
                     _ => {}
                 }
             }
@@ -120,8 +136,7 @@ pub fn handle_keyboard_key<B: InputBackend>(
             // Super + Space
             // --------------------------------------------------------
             if mods.logo && keysym == keysyms::KEY_space.into() {
-                state.shell.toggle_launcher();
-                state.pending_full_redraw = true; // Force redraw to show/hide launcher
+                toggle_launcher(state);
 
                 tracing::info!(
                     "MITOS: launcher {}",
@@ -167,6 +182,18 @@ pub fn handle_keyboard_key<B: InputBackend>(
                 // Super + Shift + R: Reboot via mitos-init
                 if mods.shift && keysym == keysyms::KEY_r.into() {
                     crate::session::reboot();
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Shift + P: Power off via mitos-init
+                if mods.shift && keysym == keysyms::KEY_p.into() {
+                    crate::session::poweroff();
+                    return FilterResult::Intercept(());
+                }
+
+                // Super + Shift + H: Halt via mitos-init
+                if mods.shift && keysym == keysyms::KEY_h.into() {
+                    crate::session::halt();
                     return FilterResult::Intercept(());
                 }
 
