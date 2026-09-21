@@ -1,4 +1,4 @@
-name: Build MITOS GUI
+name: Build MITOS-GUI
 
 on:
   push:
