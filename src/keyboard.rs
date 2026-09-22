@@ -7,6 +7,8 @@
 //! - Stage 4 window manager shortcuts (close, maximize, snap, etc.)
 //! - Stage 7 OSD (On-Screen Display) for media keys
 //! - Stage 7 Night Light toggle
+//! - Stage 7 sticky/slow/bounce keys (see `accessibility.rs` for what
+//!   these do and don't cover)
 //! - Forward normal keys to the focused Wayland client
 use smithay::input::keyboard::Keysym;
 use smithay::backend::input::{
@@ -19,9 +21,10 @@ use smithay::backend::input::{
 use smithay::input::keyboard::{
     keysyms,
     FilterResult,
+    KeyboardHandle,
 };
 
-use smithay::utils::SERIAL_COUNTER;
+use smithay::utils::{Serial, SERIAL_COUNTER};
 
 use crate::state::MitosGuiState;
 
@@ -39,6 +42,12 @@ fn keysym_to_char(keysym: Keysym) -> Option<char> {
 }
 
 /// Feed one raw keyboard event into the MITOS seat.
+///
+/// Slow-keys/bounce-keys sit in front of everything else here (see
+/// `accessibility::KeyFilter`): they decide whether this physical
+/// event reaches the seat's keyboard state *at all*, before anything
+/// downstream -- including xkb's own modifier tracking -- ever sees
+/// it.
 pub fn handle_keyboard_key<B: InputBackend>(
     state: &mut MitosGuiState,
     event: B::KeyboardKeyEvent,
@@ -47,11 +56,49 @@ pub fn handle_keyboard_key<B: InputBackend>(
         return;
     };
 
-    let serial = SERIAL_COUNTER.next_serial();
     let time = event.time_msec();
     let keycode = event.key_code();
     let key_state = event.state();
 
+    let decision = state.key_filter.filter(
+        keycode,
+        key_state == KeyState::Pressed,
+        state.home_screen.slow_keys,
+        state.home_screen.bounce_keys,
+    );
+
+    match decision {
+        crate::accessibility::FilterDecision::Swallow => {}
+
+        crate::accessibility::FilterDecision::Pass => {
+            let serial = SERIAL_COUNTER.next_serial();
+            dispatch_key(state, &keyboard, keycode, key_state, serial, time);
+        }
+
+        crate::accessibility::FilterDecision::ConfirmedHold => {
+            // Slow-keys swallowed the original keydown while timing
+            // it, so nothing downstream (including xkb) has seen this
+            // key yet. Send a fresh, properly-paired press then
+            // release now instead -- both timestamped to this moment,
+            // not the original keydown -- so xkb's internal state
+            // machine sees an ordinary complete keypress rather than a
+            // resurrected half of one.
+            let serial = SERIAL_COUNTER.next_serial();
+            dispatch_key(state, &keyboard, keycode, KeyState::Pressed, serial, time);
+            let serial = SERIAL_COUNTER.next_serial();
+            dispatch_key(state, &keyboard, keycode, KeyState::Released, serial, time);
+        }
+    }
+}
+
+fn dispatch_key(
+    state: &mut MitosGuiState,
+    keyboard: &KeyboardHandle<MitosGuiState>,
+    keycode: smithay::backend::input::Keycode,
+    key_state: KeyState,
+    serial: Serial,
+    time: u32,
+) {
     keyboard.input::<(), _>(
         state,
         keycode,
@@ -60,6 +107,69 @@ pub fn handle_keyboard_key<B: InputBackend>(
         time,
         |state, mods, sym| {
             let keysym = sym.modified_sym();
+
+            // --------------------------------------------------------
+            // STICKY KEYS: bare-modifier-tap detection.
+            //
+            // Runs unconditionally, ahead of every other branch below
+            // (including the auth-prompt gate), since it only ever
+            // touches `state.sticky_latch`/`state.sticky_combo_used`,
+            // ready for whatever key comes next -- it never itself
+            // intercepts or forwards this event.
+            //
+            // `any_mod_down` reflects the *post*-this-event modifier
+            // state (xkb has already applied this press/release by the
+            // time this closure runs), so on the release that ends a
+            // bare tap it correctly reads as "nothing held anymore".
+            // --------------------------------------------------------
+            let is_mod_key = crate::accessibility::StickyLatch::is_modifier_keysym(keysym.raw());
+            let any_mod_down = mods.shift || mods.ctrl || mods.alt || mods.logo;
+
+            if key_state == KeyState::Pressed && !is_mod_key && any_mod_down {
+                state.sticky_combo_used = true;
+            }
+
+            if is_mod_key && key_state == KeyState::Released && state.home_screen.sticky_keys {
+                if !any_mod_down && !state.sticky_combo_used {
+                    state.sticky_latch.toggle(keysym.raw());
+                    state.pending_full_redraw = true;
+                }
+            }
+
+            if !any_mod_down {
+                state.sticky_combo_used = false;
+            }
+
+            // --------------------------------------------------------
+            // TOGGLE KEY FEEDBACK (Stage 7)
+            // Caps/Num Lock have no on-screen indicator of their own on
+            // most keyboards worth relying on -- surface a change via
+            // the same OSD the volume/brightness keys already use.
+            // --------------------------------------------------------
+            if mods.caps_lock != state.caps_lock_was {
+                state.caps_lock_was = mods.caps_lock;
+                state.osd.trigger(
+                    crate::state::OsdIcon::CapsLock,
+                    if mods.caps_lock { 1.0 } else { 0.0 },
+                );
+                state.pending_full_redraw = true;
+            }
+            if mods.num_lock != state.num_lock_was {
+                state.num_lock_was = mods.num_lock;
+                state.osd.trigger(
+                    crate::state::OsdIcon::NumLock,
+                    if mods.num_lock { 1.0 } else { 0.0 },
+                );
+                state.pending_full_redraw = true;
+            }
+
+            // Every check below this point sees physically-held OR
+            // sticky-latched modifiers under the name `mods`, without
+            // needing to touch each individual check -- see
+            // `accessibility.rs`'s module doc for exactly what that
+            // does and doesn't extend to.
+            let eff_mods = crate::accessibility::EffectiveMods::compute(mods, &state.sticky_latch);
+            let mods = &eff_mods;
 
             // --------------------------------------------------------
             // SECURE AUTHENTICATION PROMPT (Highest Priority)
@@ -128,6 +238,35 @@ pub fn handle_keyboard_key<B: InputBackend>(
             // --------------------------------------------------------
             if state.shell.launcher_visible {
                 return handle_launcher_input(state, keysym.into(), key_state);
+            }
+
+            // --------------------------------------------------------
+            // DOCK KEYBOARD NAVIGATION (Stage 7)
+            // While focused, captures Left/Right/Enter/Escape; mirrors
+            // how the launcher results list captures input above.
+            // --------------------------------------------------------
+            if state.shell.dock_focused.is_some() {
+                return handle_dock_focus_input(state, keysym.into(), key_state);
+            }
+
+            // Super + D: move keyboard focus into the dock, so it's
+            // reachable without a mouse. Only makes sense with a dock
+            // to focus into.
+            if mods.logo && keysym == keysyms::KEY_d.into() && state.shell.dock.is_some() {
+                state.shell.toggle_dock_focus();
+                state.pending_full_redraw = true;
+                tracing::info!(
+                    "MITOS: dock focus {}",
+                    if state.shell.dock_focused.is_some() { "entered" } else { "exited" }
+                );
+                return FilterResult::Intercept(());
+            }
+
+            // Super + K: toggle the on-screen keyboard.
+            if mods.logo && keysym == keysyms::KEY_k.into() {
+                state.osk_visible = !state.osk_visible;
+                state.pending_full_redraw = true;
+                return FilterResult::Intercept(());
             }
 
             // --------------------------------------------------------
@@ -319,6 +458,45 @@ pub fn handle_keyboard_key<B: InputBackend>(
 }
 
 /// Handles typing, navigation, and execution inside the open launcher.
+/// Handles Left/Right/Enter/Escape while the dock has keyboard focus
+/// (Stage 7 dock keyboard navigation -- see `MitosShell::dock_focused`).
+fn handle_dock_focus_input(
+    state: &mut MitosGuiState,
+    keysym: Keysym,
+    key_state: KeyState,
+) -> FilterResult<()> {
+    if key_state != KeyState::Pressed {
+        return FilterResult::Intercept(());
+    }
+
+    match keysym.raw() {
+        keysyms::KEY_Escape => {
+            state.shell.dock_focused = None;
+        }
+
+        keysyms::KEY_Left => state.shell.move_dock_focus(-1),
+        keysyms::KEY_Right => state.shell.move_dock_focus(1),
+
+        keysyms::KEY_Return | keysyms::KEY_space => {
+            let id = state
+                .shell
+                .dock_focused
+                .and_then(|i| state.shell.dock_layout.items.get(i))
+                .map(|item| item.id);
+
+            if let Some(id) = id {
+                crate::shell_interaction::launch_app(state, id);
+            }
+            state.shell.dock_focused = None;
+        }
+
+        _ => {}
+    }
+
+    state.pending_full_redraw = true;
+    FilterResult::Intercept(())
+}
+
 fn handle_launcher_input(
     state: &mut MitosGuiState,
     keysym: u32,
@@ -506,4 +684,136 @@ fn submit_elevation(state: &mut MitosGuiState) {
 fn cancel_elevation(state: &mut MitosGuiState) {
     state.auth.password.clear();
     respond_elevation(state, mitos_session::elevation::ElevationResponse::Cancelled);
+}
+
+/// Route one on-screen-keyboard key click (see `osk.rs`'s module doc
+/// for the two delivery paths and their confidence levels). Mirrors
+/// `handle_auth_input`/`handle_launcher_input`'s character handling
+/// exactly -- same fields, same follow-up calls -- when one of
+/// MITOS's own text fields is active; synthesizes a real key event
+/// otherwise.
+pub fn handle_osk_key(state: &mut MitosGuiState, key: &crate::osk::OskKey) {
+    use crate::osk::OskAction;
+
+    if key.action == OskAction::Shift {
+        state.osk_shift = !state.osk_shift;
+        state.pending_full_redraw = true;
+        return;
+    }
+
+    // Shift (if it was on) applies to this one key only, regardless of
+    // which path below ends up handling it.
+    let shift_active = state.osk_shift;
+    state.osk_shift = false;
+
+    if state.auth.active {
+        match key.action {
+            OskAction::Letter => {
+                if let Some(c) = crate::osk::key_char(key, shift_active) {
+                    state.auth.password.push(c);
+                }
+            }
+            OskAction::Space => state.auth.password.push(' '),
+            OskAction::Backspace => {
+                state.auth.password.pop();
+            }
+            OskAction::Enter => {
+                if state.auth.is_lock_screen {
+                    submit_lock_screen(state);
+                } else if state.auth.request_id.is_some() {
+                    submit_elevation(state);
+                } else if state.auth.submit() {
+                    state.notifications.push("MITOS Security", "Authentication successful", "Privileges granted.");
+                } else {
+                    state.notifications.push("MITOS Security", "Authentication failed", "Incorrect password.");
+                }
+            }
+            OskAction::Shift => unreachable!(),
+        }
+        state.pending_full_redraw = true;
+        return;
+    }
+
+    if state.shell.launcher_visible {
+        match key.action {
+            OskAction::Letter => {
+                if let Some(c) = crate::osk::key_char(key, shift_active) {
+                    state.shell.launcher_query.push(c);
+                    update_launcher_results(state);
+                }
+            }
+            OskAction::Space => {
+                state.shell.launcher_query.push(' ');
+                update_launcher_results(state);
+            }
+            OskAction::Backspace => {
+                state.shell.launcher_query.pop();
+                update_launcher_results(state);
+            }
+            OskAction::Enter => {
+                if let Some(app) = state.shell.launcher_results.get(state.shell.launcher_selected) {
+                    crate::shell_interaction::launch_app_entry(app);
+                }
+                state.shell.toggle_launcher();
+            }
+            OskAction::Shift => unreachable!(),
+        }
+        state.pending_full_redraw = true;
+        return;
+    }
+
+    dispatch_synthetic_key(state, key, shift_active);
+}
+
+/// Synthesize a real key event toward whatever client has focus, for
+/// on-screen-keyboard clicks when neither the auth prompt nor the
+/// launcher is open to receive a character directly. See `osk.rs`'s
+/// module doc: this is the lower-confidence of the OSK's two delivery
+/// paths.
+fn dispatch_synthetic_key(state: &mut MitosGuiState, key: &crate::osk::OskKey, shift_active: bool) {
+    let Some(keyboard) = state.seat.get_keyboard() else {
+        return;
+    };
+
+    let evdev_code = match key.action {
+        crate::osk::OskAction::Letter => key.evdev_code,
+        crate::osk::OskAction::Space => Some(57),     // KEY_SPACE
+        crate::osk::OskAction::Backspace => Some(14), // KEY_BACKSPACE
+        crate::osk::OskAction::Enter => Some(28),     // KEY_ENTER
+        crate::osk::OskAction::Shift => None,
+    };
+    let Some(evdev_code) = evdev_code else {
+        return;
+    };
+
+    // No real hardware timestamp for a synthetic event -- wall-clock
+    // millis is a reasonable stand-in, same idea as `ambient_pulse`'s
+    // use of wall-clock time elsewhere in this codebase.
+    let time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u32)
+        .unwrap_or(0);
+
+    const KEY_LEFTSHIFT_EVDEV: u32 = 42;
+    // xkb/X11 keycode numbering is the evdev code plus a fixed 8-code
+    // offset -- a decades-stable convention, not something that varies
+    // by smithay version.
+    let to_keycode = |evdev: u32| smithay::backend::input::Keycode::from(evdev + 8);
+
+    if shift_active {
+        let s = SERIAL_COUNTER.next_serial();
+        dispatch_key(state, &keyboard, to_keycode(KEY_LEFTSHIFT_EVDEV), KeyState::Pressed, s, time);
+    }
+
+    let s = SERIAL_COUNTER.next_serial();
+    dispatch_key(state, &keyboard, to_keycode(evdev_code), KeyState::Pressed, s, time);
+    let s = SERIAL_COUNTER.next_serial();
+    dispatch_key(state, &keyboard, to_keycode(evdev_code), KeyState::Released, s, time);
+
+    if shift_active {
+        let s = SERIAL_COUNTER.next_serial();
+        dispatch_key(state, &keyboard, to_keycode(KEY_LEFTSHIFT_EVDEV), KeyState::Released, s, time);
+    }
+
+    state.pending_full_redraw = true;
 }

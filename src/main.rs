@@ -1,4 +1,6 @@
 mod animation;
+mod accessibility;
+mod atspi;
 mod audio;
 mod brightness;
 mod compositor;
@@ -17,6 +19,7 @@ mod text;
 mod theme;
 mod wm;
 mod notifications;
+mod osk;
 mod status;
 mod icons;
 mod i18n;
@@ -467,6 +470,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         frosted_glass::compile_window_frame_program(backend.renderer(), window_radius, window_ring)?;
 
     let mut shell_text = renderer::ShellTextState::new();
+    let osk_text = renderer::OskTextState::new();
     
     let mut tray = renderer::TrayState::new();
 
@@ -682,6 +686,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Poll D-Bus notifications
         state.poll_dbus();
         state.poll_session_ipc();
+        state.refresh_accessibility_summary();
 
         // ========================================================
         // FRAME SCHEDULING & DAMAGE TRACKING
@@ -910,6 +915,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &state.osd,
                             state.night_light,
                             &state.night_light_anim,
+                            &osk_text,
+                            state.osk_visible,
+                            state.osk_shift,
                         )?;
 
                         // ------------------------------------------------

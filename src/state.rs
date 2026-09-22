@@ -34,6 +34,10 @@ pub enum OsdIcon {
     Volume,
     Muted,
     Brightness,
+    /// Stage 7: toggle-key feedback -- lets someone who can't see the
+    /// keyboard's own indicator LED confirm Caps/Num Lock changed.
+    CapsLock,
+    NumLock,
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +103,11 @@ pub struct MitosShell {
     pub launcher_query: String,
     pub launcher_results: Vec<AppEntry>,
     pub launcher_selected: usize,
+
+    /// Stage 7: which dock item has *keyboard* focus (distinct from
+    /// mouse hover/magnification), when dock keyboard navigation is
+    /// active. `None` means the dock isn't currently keyboard-focused.
+    pub dock_focused: Option<usize>,
 }
 
 impl MitosShell {
@@ -113,6 +122,7 @@ impl MitosShell {
             launcher_query: String::new(),
             launcher_results: Vec::new(),
             launcher_selected: 0,
+            dock_focused: None,
         }
     }
 
@@ -138,6 +148,29 @@ impl MitosShell {
             self.launcher_results = crate::shell_interaction::discover_apps();
             self.launcher_selected = 0;
             self.launcher_anim = Some(crate::animation::Animation::new(Duration::from_millis(420)));
+        }
+    }
+
+    /// Toggle keyboard focus into/out of the dock (Stage 7: makes the
+    /// dock reachable without a mouse, matching how the launcher's
+    /// results list already is).
+    pub fn toggle_dock_focus(&mut self) {
+        self.dock_focused = match self.dock_focused {
+            Some(_) => None,
+            None => Some(0),
+        };
+    }
+
+    /// Move dock keyboard focus by `delta` items, wrapping at the ends.
+    /// No-op if the dock isn't currently keyboard-focused or is empty.
+    pub fn move_dock_focus(&mut self, delta: i32) {
+        let len = self.dock_layout.items.len();
+        if len == 0 {
+            return;
+        }
+        if let Some(i) = self.dock_focused {
+            let next = (i as i32 + delta).rem_euclid(len as i32) as usize;
+            self.dock_focused = Some(next);
         }
     }
 }
@@ -230,8 +263,33 @@ pub struct MitosGuiState {
     pub night_light_anim: crate::animation::Animation,
     pub hot_corners_last_triggered: Instant,
 
+    // ------------------------------------------------------------
+    // Accessibility (Stage 7)
+    // ------------------------------------------------------------
+    /// Slow-keys/bounce-keys timing state -- see `accessibility.rs`.
+    pub key_filter: crate::accessibility::KeyFilter<smithay::backend::input::Keycode>,
+    /// Sticky-keys: which modifiers are currently latched from a bare
+    /// tap, waiting for the next non-modifier key.
+    pub sticky_latch: crate::accessibility::StickyLatch,
+    /// Sticky-keys bookkeeping: whether a non-modifier key has been
+    /// pressed since the modifiers currently held all went down bare
+    /// (i.e. whether this is shaping up to be a chord, not a tap).
+    pub sticky_combo_used: bool,
+    /// Last known Caps/Num Lock state, to detect toggles for OSD
+    /// feedback -- see the top of `keyboard.rs`'s dispatch closure.
+    pub caps_lock_was: bool,
+    pub num_lock_was: bool,
+
+    /// Stage 7: on-screen keyboard visibility and its own Shift layer
+    /// (separate from the physical keyboard's -- see `osk.rs`).
+    pub osk_visible: bool,
+    pub osk_shift: bool,
     pub pending_screenshot: bool,
     pub dbus_service: Option<crate::dbus::DbusService>,
+    /// Stage 7: AT-SPI provider for MITOS's own shell -- `None` when
+    /// no accessibility bus is available (normal on most systems; see
+    /// `atspi.rs`'s module doc), not an error condition.
+    pub atspi: Option<crate::atspi::AtspiProvider>,
 
     /// Connection to mitos-session for lock-screen/session IPC. `None`
     /// when mitos-gui isn't running under a real mitos-session-managed
@@ -348,8 +406,18 @@ impl MitosGuiState {
             night_light_anim: crate::animation::Animation::new(Duration::ZERO),
             hot_corners_last_triggered: Instant::now() - Duration::from_secs(1),
 
+            key_filter: crate::accessibility::KeyFilter::default(),
+            sticky_latch: crate::accessibility::StickyLatch::default(),
+            sticky_combo_used: false,
+            caps_lock_was: false,
+            num_lock_was: false,
+
+            osk_visible: home_screen.on_screen_keyboard,
+            osk_shift: false,
+
             pending_screenshot: false,
             dbus_service: Some(dbus_service),
+            atspi: crate::atspi::AtspiProvider::connect(),
             session_ipc,
             last_activity_report: Instant::now(),
             data_device_state,
@@ -491,7 +559,16 @@ pub fn remove_output(&mut self, output: &Output) {
 
         let Some(ipc) = self.session_ipc.as_ref() else { return };
 
-        while let Ok(msg) = ipc.rx.try_recv() {
+        let mut disconnected = false;
+
+        loop {
+            match ipc.rx.try_recv() {
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+                Ok(msg) => {
             match msg {
                 Message::Event(SessionEvent::ShowLockScreen { reason, .. }) => {
                     let message = match reason {
@@ -608,11 +685,85 @@ pub fn remove_output(&mut self, output: &Output) {
 
             }
             self.pending_full_redraw = true;
+                }
+            }
+        }
+
+        if disconnected {
+            // mitos-session's connection dropped (crash, restart, socket
+            // error, ...). Whatever's on screen stays exactly as it is --
+            // a lock screen fails closed, never open -- but a "checking
+            // password..." spinner that can now never resolve (no more
+            // `AuthFeedback` is ever coming) is its own kind of broken,
+            // so say why instead of leaving Enter looking like it does
+            // nothing. `self.session_ipc = None` also means Super+L,
+            // `submit_lock_screen`, and `respond_elevation` all fall
+            // into their existing "not connected to mitos-session"
+            // paths from here on, rather than needing a second thing to
+            // check.
+            self.session_ipc = None;
+            if self.auth.active {
+                self.auth.pending = false;
+                self.auth.error_msg = Some(
+                    "Lost connection to mitos-session -- cannot verify password".to_string(),
+                );
+            }
+            self.pending_full_redraw = true;
         }
     }
     
 
-        /// Switches the workspace on a specific monitor
+        /// Rebuilds the AT-SPI shell summary from current state and pushes
+    /// it (see `atspi.rs`). Called once per frame from the main loop;
+    /// cheap when nothing accessibility-relevant changed, which is
+    /// most frames -- a handful of field reads, no allocation unless
+    /// something's actually different from last time. No-ops
+    /// entirely when no accessibility bus is connected.
+    pub fn refresh_accessibility_summary(&mut self) {
+        let Some(atspi) = self.atspi.as_ref() else { return };
+
+        let mut parts = Vec::new();
+
+        if self.shell.launcher_visible {
+            if self.shell.launcher_query.is_empty() {
+                parts.push("Launcher open".to_string());
+            } else {
+                parts.push(format!(
+                    "Launcher: \"{}\", {} results",
+                    self.shell.launcher_query,
+                    self.shell.launcher_results.len(),
+                ));
+            }
+        }
+
+        if let Some(i) = self.shell.dock_focused {
+            if let Some(item) = self.shell.dock_layout.items.get(i) {
+                parts.push(format!("Dock: {} focused", item.name));
+            }
+        }
+
+        if !self.notifications.active.is_empty() {
+            parts.push(format!("{} notification(s)", self.notifications.active.len()));
+        }
+
+        if self.auth.active {
+            parts.push(if self.auth.is_lock_screen {
+                "Screen locked".to_string()
+            } else {
+                "Authentication requested".to_string()
+            });
+        }
+
+        let description = if parts.is_empty() {
+            "Idle".to_string()
+        } else {
+            parts.join("; ")
+        };
+
+        atspi.announce_change("MITOS Shell", description);
+    }
+
+    /// Switches the workspace on a specific monitor
     pub fn switch_workspace(&mut self, output_name: &str, ws: usize) {
         self.current_workspace.insert(output_name.to_string(), ws);
         self.pending_full_redraw = true;

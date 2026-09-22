@@ -75,6 +75,36 @@ pub struct HomeScreenConfig {
 
     /// Whether Night Light (blue light filter) is enabled.
     pub night_light: bool,
+
+    // ------------------------------------------------------------
+    // Accessibility (Stage 7)
+    // ------------------------------------------------------------
+    /// Shortens/skips shell animations (launcher ring, window
+    /// materialize flash, night-light fade, breathing pulses on the
+    /// auth prompt/notifications/OSD) for people sensitive to motion.
+    pub reduce_motion: bool,
+
+    /// Boosts contrast across the shell: less glass transparency,
+    /// stronger borders, higher-contrast text.
+    pub high_contrast: bool,
+
+    /// A modifier key (Shift/Ctrl/Alt/Super) presses and releases as
+    /// its own key, latching until a non-modifier key is pressed,
+    /// instead of needing to be held for a chord.
+    pub sticky_keys: bool,
+
+    /// A key must be held for a minimum duration before it registers,
+    /// filtering out presses from unsteady hands brushing the keyboard.
+    pub slow_keys: bool,
+
+    /// Repeat presses of the same key within a short window are
+    /// ignored, filtering out a hand that bounces on a key it meant to
+    /// press once.
+    pub bounce_keys: bool,
+
+    /// Whether the on-screen keyboard is shown at startup (it can also
+    /// be toggled live regardless of this).
+    pub on_screen_keyboard: bool,
 }
 
 impl Default for HomeScreenConfig {
@@ -100,6 +130,13 @@ impl Default for HomeScreenConfig {
             panel_radius: None,
             wallpaper_path: None,
             night_light: false,
+
+            reduce_motion: false,
+            high_contrast: false,
+            sticky_keys: false,
+            slow_keys: false,
+            bounce_keys: false,
+            on_screen_keyboard: false,
         }
     }
 }
@@ -305,6 +342,63 @@ impl HomeScreenConfig {
                     Some(enabled) => config.night_light = enabled,
                     None => tracing::warn!(
                         "MITOS GUI: {}:{}: expected `true` or `false` for night_light, got {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                // --------------------------------------------------------
+                // Accessibility (Stage 7)
+                // --------------------------------------------------------
+                "reduce_motion" => match parse_bool(value) {
+                    Some(enabled) => config.reduce_motion = enabled,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false` for reduce_motion, got {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "high_contrast" => match parse_bool(value) {
+                    Some(enabled) => config.high_contrast = enabled,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false` for high_contrast, got {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "sticky_keys" => match parse_bool(value) {
+                    Some(enabled) => config.sticky_keys = enabled,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false` for sticky_keys, got {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "slow_keys" => match parse_bool(value) {
+                    Some(enabled) => config.slow_keys = enabled,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false` for slow_keys, got {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "bounce_keys" => match parse_bool(value) {
+                    Some(enabled) => config.bounce_keys = enabled,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false` for bounce_keys, got {value:?}",
+                        path.display(),
+                        line_no + 1,
+                    ),
+                },
+
+                "on_screen_keyboard" => match parse_bool(value) {
+                    Some(enabled) => config.on_screen_keyboard = enabled,
+                    None => tracing::warn!(
+                        "MITOS GUI: {}:{}: expected `true` or `false` for on_screen_keyboard, got {value:?}",
                         path.display(),
                         line_no + 1,
                     ),

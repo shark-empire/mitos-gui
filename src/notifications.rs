@@ -54,7 +54,7 @@ impl NotificationManager {
             .render(title, 16.0, crate::theme::MitosTheme::TEXT.to_u8())
             .and_then(TextTexture::from_rgba);
         let body_tex = self.text_renderer
-            .render(body, 14.0, crate::theme::MitosTheme::TEXT_MUTED.to_u8())
+            .render(body, 14.0, crate::theme::MitosTheme::effective_text_muted().to_u8())
             .and_then(TextTexture::from_rgba);
 
         let notif = Notification {

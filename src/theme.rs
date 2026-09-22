@@ -173,6 +173,13 @@ pub struct RuntimeTheme {
     
     /// Glass tint color (overrides GLASS constant).
     pub glass_tint: Color,
+
+    /// Stage 7: shortens/skips shell animations for motion sensitivity.
+    pub reduce_motion: bool,
+
+    /// Stage 7: boosts contrast -- less glass transparency, stronger
+    /// borders and text.
+    pub high_contrast: bool,
 }
 
 /// Global runtime theme state.
@@ -189,7 +196,13 @@ impl MitosTheme {
     pub fn apply_runtime(config: &crate::desktop::HomeScreenConfig) {
         let is_dark = config.theme_mode != "light";
         
-        let glass_alpha = config.glass_opacity.unwrap_or(Self::GLASS.a);
+        let mut glass_alpha = config.glass_opacity.unwrap_or(Self::GLASS.a);
+        if config.high_contrast {
+            // A very transparent panel undermines the whole point of
+            // high contrast -- floor it well above the normal default
+            // regardless of what glass_opacity says.
+            glass_alpha = glass_alpha.max(0.92);
+        }
         
         let glass_tint = if is_dark {
             Color::rgba(0.10, 0.13, 0.18, glass_alpha)
@@ -203,6 +216,8 @@ impl MitosTheme {
             panel_radius: config.panel_radius.unwrap_or(Self::PANEL_RADIUS),
             accent: config.accent_color.unwrap_or(Self::ACCENT),
             glass_tint,
+            reduce_motion: config.reduce_motion,
+            high_contrast: config.high_contrast,
         };
 
         *RUNTIME_THEME.write().unwrap() = Some(rt);
@@ -211,6 +226,39 @@ impl MitosTheme {
     /// Get the current runtime theme, if any.
     pub fn runtime() -> Option<RuntimeTheme> {
         RUNTIME_THEME.read().unwrap().clone()
+    }
+
+    /// Whether shell animations should be shortened/skipped.
+    pub fn reduce_motion() -> bool {
+        Self::runtime().map(|rt| rt.reduce_motion).unwrap_or(false)
+    }
+
+    /// Whether high-contrast mode is active.
+    pub fn is_high_contrast() -> bool {
+        Self::runtime().map(|rt| rt.high_contrast).unwrap_or(false)
+    }
+
+    /// Effective panel border: a much stronger, more opaque line in
+    /// high contrast, since edges shouldn't depend on glass blur/
+    /// transparency to read clearly.
+    pub fn effective_border() -> Color {
+        if Self::is_high_contrast() {
+            Color::rgba(1.0, 1.0, 1.0, 0.85)
+        } else {
+            Self::BORDER
+        }
+    }
+
+    /// Effective muted/secondary text color: promoted to full-strength
+    /// `TEXT` in high contrast, where a dimmed secondary color is
+    /// exactly the kind of low-contrast text this setting exists to
+    /// avoid.
+    pub fn effective_text_muted() -> Color {
+        if Self::is_high_contrast() {
+            Self::TEXT
+        } else {
+            Self::TEXT_MUTED
+        }
     }
 
     /// Get the effective glass color (runtime override or default).

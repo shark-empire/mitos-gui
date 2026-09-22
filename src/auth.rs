@@ -267,4 +267,12 @@ impl AuthPrompt {
             self.activate_elevation(next.request_id, &next.app_name, &next.subtitle, next.critical);
         }
     }
+
+    /// How many more elevation prompts are waiting behind whatever's
+    /// currently shown (including behind the lock screen, since
+    /// `request_elevation` queues rather than interrupting it too).
+    /// Used only for the "+N more" hint in `collect_auth_elements`.
+    pub fn queue_len(&self) -> usize {
+        self.queue.len()
+    }
 }

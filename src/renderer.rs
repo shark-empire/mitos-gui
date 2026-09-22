@@ -157,7 +157,7 @@ impl GlassPanel {
         radius: f32,
         tint: Color32F,
     ) -> Self {
-        let border = MitosTheme::BORDER;
+        let border = MitosTheme::effective_border();
 
         Self {
             position,
@@ -765,6 +765,12 @@ pub fn window_frame_border_color() -> Color32F {
 /// stored `Animation`, so any number of callers can read it independently
 /// without needing shared per-window animation state.
 fn ambient_pulse(period_secs: f64) -> f32 {
+    if crate::theme::MitosTheme::reduce_motion() {
+        // A fixed mid-glow instead of a continuous oscillation --
+        // still reads as "active"/"attention", just static.
+        return 0.5;
+    }
+
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
@@ -1178,6 +1184,7 @@ pub fn collect_dock_elements(
     renderer: &mut GlesRenderer,
     scale: Scale<f64>,
     pointer_x: f64,
+    dock_focused: Option<usize>,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = collect_glass_panel_elements(
         panel, glass_panel, bg, shadow_buffer, highlight_buffer,
@@ -1185,7 +1192,7 @@ pub fn collect_dock_elements(
     );
 
     elements.extend(collect_dock_icon_elements(
-        panel, layout, renderer, scale, pointer_x,
+        panel, layout, renderer, scale, pointer_x, dock_focused,
     ));
 
     elements
@@ -1197,6 +1204,7 @@ fn collect_dock_icon_elements(
     renderer: &mut GlesRenderer,
     scale: Scale<f64>,
     pointer_x: f64,
+    dock_focused: Option<usize>,
 ) -> Vec<ChromeRenderElement> {
     let mut elements = Vec::new();
 
@@ -1262,6 +1270,43 @@ fn collect_dock_icon_elements(
             scale,
             1.0,
         ));
+
+        // Stage 7: keyboard-focus ring, drawn as four thin accent-color
+        // strips around the icon -- a real outline (not just a filled
+        // halo behind it) so it reads distinctly from the mouse-hover
+        // magnification, which is scale, not color.
+        if dock_focused == Some(index) {
+            let a = MitosTheme::effective_accent();
+            let ring_color = Color32F::new(a.r, a.g, a.b, 0.95);
+            let pad = 5;
+            let thickness = 3;
+            let rx = x - pad;
+            let ry = y - pad;
+            let rw = size_i + pad * 2;
+            let rh = size_i + pad * 2;
+
+            let top = SolidColorBuffer::new((rw, thickness), ring_color);
+            elements.extend(top.render_elements(renderer, (rx, ry).into(), scale, 1.0));
+
+            let bottom = SolidColorBuffer::new((rw, thickness), ring_color);
+            elements.extend(bottom.render_elements(
+                renderer,
+                (rx, ry + rh - thickness).into(),
+                scale,
+                1.0,
+            ));
+
+            let left = SolidColorBuffer::new((thickness, rh), ring_color);
+            elements.extend(left.render_elements(renderer, (rx, ry).into(), scale, 1.0));
+
+            let right = SolidColorBuffer::new((thickness, rh), ring_color);
+            elements.extend(right.render_elements(
+                renderer,
+                (rx + rw - thickness, ry).into(),
+                scale,
+                1.0,
+            ));
+        }
     }
 
     elements
@@ -1645,6 +1690,11 @@ pub fn collect_shell_elements(
             // which key off `panel.position`/`size` directly and are
             // left completely untouched.
             if let Some(anim) = shell.launcher_anim {
+                if crate::theme::MitosTheme::reduce_motion() {
+                    // Purely decorative -- reduced motion skips it
+                    // outright rather than easing it down, same as the
+                    // window-open flash below.
+                } else {
                 let progress = anim.progress(std::time::Instant::now());
                 if !progress.is_finished() {
                     let eased = progress.ease_out_back().0.max(0.0);
@@ -1662,6 +1712,7 @@ pub fn collect_shell_elements(
                     );
 
                     elements.push(ChromeRenderElement::Glass(launcher_ring.clone()));
+                }
                 }
             }
 
@@ -1738,7 +1789,7 @@ pub fn collect_shell_elements(
             panel, dock_layout, dock_glass,
             bg_texture.map(|t| (t, dock_frost)),
             dock_shadow, dock_highlight, dock_border,
-            renderer, scale, pointer.0,
+            renderer, scale, pointer.0, shell.dock_focused,
         ));
     }
 
@@ -1967,7 +2018,7 @@ pub fn collect_window_glass_frame_elements(
         // `focused`/client identity, same as the ring itself.
         const MATERIALIZE_SECS: f32 = 0.45;
         let since_mapped = crate::wm::meta(window).mapped_at.elapsed().as_secs_f32();
-        if since_mapped < MATERIALIZE_SECS {
+        if !MitosTheme::reduce_motion() && since_mapped < MATERIALIZE_SECS {
             let decay = 1.0 - (since_mapped / MATERIALIZE_SECS);
             let boost = decay * decay; // eases the fade-out rather than a linear ramp-down
             let accent = MitosTheme::effective_accent();
@@ -2146,6 +2197,26 @@ pub fn collect_auth_elements(
         }
     }
 
+    // "+N more" in the corner when something else is queued behind
+    // this prompt (another elevation request, possibly behind the
+    // lock screen itself) -- otherwise the next one just appears the
+    // moment this one closes with no warning it was already waiting.
+    // Rendered fresh each frame like `error_msg` below, not cached:
+    // it's a single-digit count shown only rarely, not worth a texture
+    // slot on `auth` for.
+    let queued = auth.queue_len();
+    if queued > 0 {
+        let label = format!("+{queued} more");
+        if let Some(img) = auth.text_renderer.render(&label, 12.0, (200, 205, 215, 200)) {
+            if let Some(tex) = crate::text::TextTexture::from_rgba(img) {
+                let tx = x + w - tex.size.w - 16;
+                if let Ok(el) = tex.element(renderer, (tx, y + 16)) {
+                    elements.push(ChromeRenderElement::Buffer(el));
+                }
+            }
+        }
+    }
+
     let field_w = w - 40;
     let field_h = 40;
     let field_x = x + 20;
@@ -2319,8 +2390,14 @@ pub fn collect_night_light_elements(
         return elements;
     }
 
-    let progress = anim.progress(now).ease_in_out().0;
-    let alpha = if night_light { progress } else { 1.0 - progress };
+    let alpha = if crate::theme::MitosTheme::reduce_motion() {
+        // Snap straight to the target state instead of easing toward
+        // it over ANIMATION_MS.
+        if night_light { 1.0 } else { 0.0 }
+    } else {
+        let progress = anim.progress(now).ease_in_out().0;
+        if night_light { progress } else { 1.0 - progress }
+    };
 
     let night_tint = Color32F::new(1.0, 0.75, 0.45, 0.15 * alpha);
     let tint_buf = SolidColorBuffer::new(output_size, night_tint);
@@ -2383,6 +2460,106 @@ pub fn collect_background_elements(
     Ok(elements)
 }
 
+/// Pre-rendered on-screen-keyboard key labels -- built once, since
+/// `osk::layout()`'s labels never change (shown as fixed uppercase,
+/// like a physical keycap is printed, regardless of the OSK's own
+/// Shift state -- see `osk.rs`'s module doc).
+pub struct OskTextState {
+    labels: Vec<Vec<Option<crate::text::TextTexture>>>,
+}
+
+impl OskTextState {
+    pub fn new() -> Self {
+        let text_renderer = crate::text::TextRenderer::new();
+        let labels = crate::osk::layout()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|key| {
+                        text_renderer
+                            .render(key.label, 15.0, MitosTheme::TEXT.to_u8())
+                            .and_then(crate::text::TextTexture::from_rgba)
+                    })
+                    .collect()
+            })
+            .collect();
+
+        Self { labels }
+    }
+}
+
+/// Collect the on-screen keyboard's glass panel and keys. Geometry
+/// comes from `osk::compute_geometry`, the same function
+/// `pointer.rs`'s click hit-testing uses, so a key always looks
+/// clickable exactly where it is clickable.
+pub fn collect_osk_elements(
+    renderer: &mut GlesRenderer,
+    text: &OskTextState,
+    shift_active: bool,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+
+    let (panel, row_rects) = crate::osk::compute_geometry(output_size);
+
+    let bg = MitosTheme::effective_glass();
+    let panel_buf = SolidColorBuffer::new(
+        (panel.size.w, panel.size.h),
+        Color32F::new(bg.r, bg.g, bg.b, (bg.a + 0.15).min(1.0)),
+    );
+    elements.extend(panel_buf.render_elements(
+        renderer,
+        (panel.loc.x, panel.loc.y).into(),
+        scale,
+        1.0,
+    ));
+
+    let border = MitosTheme::effective_border();
+    let border_buf = SolidColorBuffer::new(
+        (panel.size.w, 2),
+        Color32F::new(border.r, border.g, border.b, border.a),
+    );
+    elements.extend(border_buf.render_elements(renderer, (panel.loc.x, panel.loc.y).into(), scale, 1.0));
+
+    let rows = crate::osk::layout();
+
+    for (ri, row) in rows.iter().enumerate() {
+        for (ki, key) in row.iter().enumerate() {
+            let Some(rect) = row_rects.get(ri).and_then(|r| r.get(ki)) else {
+                continue;
+            };
+
+            let is_shift = key.action == crate::osk::OskAction::Shift;
+            let key_color = if is_shift && shift_active {
+                MitosTheme::effective_accent()
+            } else {
+                crate::theme::Color::rgba(1.0, 1.0, 1.0, 0.10)
+            };
+            let key_buf = SolidColorBuffer::new(
+                (rect.size.w, rect.size.h),
+                Color32F::new(key_color.r, key_color.g, key_color.b, key_color.a.max(0.10)),
+            );
+            elements.extend(key_buf.render_elements(
+                renderer,
+                (rect.loc.x, rect.loc.y).into(),
+                scale,
+                1.0,
+            ));
+
+            if let Some(Some(tex)) = text.labels.get(ri).and_then(|r| r.get(ki)) {
+                let tx = rect.loc.x + (rect.size.w - tex.size.w) / 2;
+                let ty = rect.loc.y + (rect.size.h - tex.size.h) / 2;
+                if let Ok(el) = tex.element(renderer, (tx, ty)) {
+                    elements.push(ChromeRenderElement::Buffer(el));
+                }
+            }
+        }
+    }
+
+    elements
+}
+
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
@@ -2415,6 +2592,9 @@ pub fn collect_frame_elements(
     osd: &crate::state::OsdState,
     night_light: bool,
     night_light_anim: &crate::animation::Animation,
+    osk_text: &OskTextState,
+    osk_visible: bool,
+    osk_shift: bool,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
@@ -2502,6 +2682,13 @@ pub fn collect_frame_elements(
     // 7. ON-SCREEN DISPLAY (OSD)
     // ------------------------------------------------------------
     elements.extend(collect_osd_elements(renderer, osd, output_size, scale));
+
+    // ------------------------------------------------------------
+    // 8. ON-SCREEN KEYBOARD (Stage 7)
+    // ------------------------------------------------------------
+    if osk_visible {
+        elements.extend(collect_osk_elements(renderer, osk_text, osk_shift, output_size, scale));
+    }
 
     Ok(elements)
 }

@@ -122,6 +122,41 @@ pub fn handle_pointer_button<B: InputBackend>(
     }
 
     // ------------------------------------------------------------
+    // On-screen keyboard key click (Stage 7).
+    // ------------------------------------------------------------
+    if state.osk_visible && matches!(button_state, ButtonState::Pressed) && button == BTN_LEFT {
+        let output_size = crate::wm::output_size(state);
+        let (panel, row_rects) = crate::osk::compute_geometry(output_size);
+        let (px, py) = (state.pointer_location.x as i32, state.pointer_location.y as i32);
+
+        let inside_panel = px >= panel.loc.x
+            && px < panel.loc.x + panel.size.w
+            && py >= panel.loc.y
+            && py < panel.loc.y + panel.size.h;
+
+        if inside_panel {
+            let rows = crate::osk::layout();
+            'hit: for (ri, row) in row_rects.iter().enumerate() {
+                for (ki, rect) in row.iter().enumerate() {
+                    let hit = px >= rect.loc.x
+                        && px < rect.loc.x + rect.size.w
+                        && py >= rect.loc.y
+                        && py < rect.loc.y + rect.size.h;
+                    if hit {
+                        if let Some(key) = rows.get(ri).and_then(|r| r.get(ki)) {
+                            crate::keyboard::handle_osk_key(state, key);
+                        }
+                        break 'hit;
+                    }
+                }
+            }
+            // Landed on the OSK panel either way -- don't fall through
+            // to dock/window click handling underneath it.
+            return;
+        }
+    }
+
+    // ------------------------------------------------------------
     // Dock icon click.
     // ------------------------------------------------------------
     if matches!(button_state, ButtonState::Pressed) && button == BTN_LEFT {
