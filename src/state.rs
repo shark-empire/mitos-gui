@@ -284,6 +284,12 @@ pub struct MitosGuiState {
     /// (separate from the physical keyboard's -- see `osk.rs`).
     pub osk_visible: bool,
     pub osk_shift: bool,
+    /// Stage 7: last-seen launcher/auth visibility, so
+    /// `refresh_accessibility_summary` can tell a transition (worth an
+    /// AT-SPI `StateChanged` announcement) from "still open this frame
+    /// too" (not worth re-announcing every frame).
+    atspi_launcher_was_visible: bool,
+    atspi_auth_was_active: bool,
     pub pending_screenshot: bool,
     pub dbus_service: Option<crate::dbus::DbusService>,
     /// Stage 7: AT-SPI provider for MITOS's own shell -- `None` when
@@ -414,10 +420,18 @@ impl MitosGuiState {
 
             osk_visible: home_screen.on_screen_keyboard,
             osk_shift: false,
+            atspi_launcher_was_visible: false,
+            atspi_auth_was_active: false,
 
             pending_screenshot: false,
             dbus_service: Some(dbus_service),
-            atspi: crate::atspi::AtspiProvider::connect(),
+            atspi: crate::atspi::AtspiProvider::connect(
+                crate::desktop::DockLayout::default()
+                    .items
+                    .into_iter()
+                    .map(|item| crate::atspi::DockItemInfo { id: item.id, name: item.name })
+                    .collect(),
+            ),
             session_ipc,
             last_activity_report: Instant::now(),
             data_device_state,
@@ -714,14 +728,13 @@ pub fn remove_output(&mut self, output: &Output) {
     
 
         /// Rebuilds the AT-SPI shell summary from current state and pushes
-    /// it (see `atspi.rs`). Called once per frame from the main loop;
-    /// cheap when nothing accessibility-relevant changed, which is
-    /// most frames -- a handful of field reads, no allocation unless
-    /// something's actually different from last time. No-ops
+    /// it, syncs the notifications tree, announces launcher/auth state
+    /// transitions, and drains any dock-item activations a screen
+    /// reader triggered since the last call (see `atspi.rs`). Called
+    /// once per frame from the main loop; cheap when nothing
+    /// accessibility-relevant changed, which is most frames. No-ops
     /// entirely when no accessibility bus is connected.
     pub fn refresh_accessibility_summary(&mut self) {
-        let Some(atspi) = self.atspi.as_ref() else { return };
-
         let mut parts = Vec::new();
 
         if self.shell.launcher_visible {
@@ -760,7 +773,43 @@ pub fn remove_output(&mut self, output: &Output) {
             parts.join("; ")
         };
 
-        atspi.announce_change("MITOS Shell", description);
+        // Gathered up front so nothing below still needs to borrow
+        // `self.shell`/`self.notifications`/`self.auth` while
+        // `self.atspi` is borrowed mutably just after.
+        let dock_focused = self.shell.dock_focused;
+        let launcher_visible = self.shell.launcher_visible;
+        let auth_active = self.auth.active;
+        let active_notifs: Vec<(u32, String)> = self
+            .notifications
+            .active
+            .iter()
+            .map(|n| (n.id, n.title.clone()))
+            .collect();
+        let launcher_was = self.atspi_launcher_was_visible;
+        let auth_was = self.atspi_auth_was_active;
+
+        let pending_actions = if let Some(atspi) = self.atspi.as_mut() {
+            atspi.update_summary(description, dock_focused);
+            atspi.sync_notifications(&active_notifs);
+
+            if launcher_visible != launcher_was {
+                atspi.announce_state_change("showing", launcher_visible);
+            }
+            if auth_active != auth_was {
+                atspi.announce_state_change("modal", auth_active);
+            }
+
+            atspi.poll_actions()
+        } else {
+            Vec::new()
+        };
+
+        self.atspi_launcher_was_visible = launcher_visible;
+        self.atspi_auth_was_active = auth_active;
+
+        for id in pending_actions {
+            crate::shell_interaction::launch_app(self, &id);
+        }
     }
 
     /// Switches the workspace on a specific monitor
