@@ -34,6 +34,11 @@ const MAX_HISTORY: usize = 50;
 pub struct NotificationManager {
     pub active: Vec<Notification>,
     pub history: Vec<Notification>, // For future Notification Center
+    /// Stage 7 (Quick Settings): while on, new notifications still get
+    /// recorded to `history` -- so nothing's silently lost -- but skip
+    /// becoming a visible toast, same as the "still logged, not
+    /// interrupting" behavior real Do Not Disturb implementations use.
+    pub dnd: bool,
     next_id: u32,
     text_renderer: TextRenderer,
 }
@@ -43,12 +48,14 @@ impl NotificationManager {
         Self {
             active: Vec::new(),
             history: Vec::new(),
+            dnd: false,
             next_id: 1,
             text_renderer: TextRenderer::new(),
         }
     }
 
-    /// Push a new notification to the screen.
+    /// Push a new notification to the screen (or straight to history,
+    /// under Do Not Disturb -- see the `dnd` field).
     pub fn push(&mut self, app_name: &str, title: &str, body: &str) {
         let title_tex = self.text_renderer
             .render(title, 16.0, crate::theme::MitosTheme::TEXT.to_u8())
@@ -67,8 +74,14 @@ impl NotificationManager {
             title_tex,
             body_tex,
         };
-        
+
         self.next_id += 1;
+
+        if self.dnd {
+            self.archive(notif);
+            return;
+        }
+
         self.active.push(notif);
 
         // Keep at most MAX_VISIBLE toasts on screen -- dismiss (and

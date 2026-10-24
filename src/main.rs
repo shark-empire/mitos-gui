@@ -5,7 +5,9 @@ mod audio;
 mod brightness;
 mod compositor;
 mod config_watcher;
+mod context_menu;
 mod desktop;
+mod desktop_icons;
 mod drm_backend;
 mod input;
 mod keyboard;
@@ -20,6 +22,8 @@ mod theme;
 mod wm;
 mod notifications;
 mod osk;
+mod overview;
+mod quick_settings;
 mod status;
 mod icons;
 mod i18n;
@@ -470,7 +474,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         frosted_glass::compile_window_frame_program(backend.renderer(), window_radius, window_ring)?;
 
     let mut shell_text = renderer::ShellTextState::new();
-    let osk_text = renderer::OskTextState::new();
+    let mut overlay_text = renderer::OverlayTextState::new();
     
     let mut tray = renderer::TrayState::new();
 
@@ -664,6 +668,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if shell_text.refresh(&state.shell) {
             state.pending_full_redraw = true;
         }
+
+        // Re-rasterize whichever overlays (Quick Settings, task switcher,
+        // workspace overview, desktop icons / context menu) are open
+        // and have changed. One shared call, so this loop and the DRM
+        // backend's can't drift apart on which overlays they know of.
+        if overlay_text.refresh(&state) {
+            state.pending_full_redraw = true;
+        }
         
         if state.poll_status_if_due() {
             state.pending_full_redraw = true;
@@ -687,6 +699,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.poll_dbus();
         state.poll_session_ipc();
         state.refresh_accessibility_summary();
+        if state.auth.active {
+            state.dismiss_transient_overlays();
+        }
 
         // ========================================================
         // FRAME SCHEDULING & DAMAGE TRACKING
@@ -915,9 +930,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &state.osd,
                             state.night_light,
                             &state.night_light_anim,
-                            &osk_text,
-                            state.osk_visible,
-                            state.osk_shift,
+                            &state,
+                            &overlay_text,
                         )?;
 
                         // ------------------------------------------------

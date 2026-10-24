@@ -163,6 +163,26 @@ fn dispatch_key(
                 state.pending_full_redraw = true;
             }
 
+            // --------------------------------------------------------
+            // TASK SWITCHER: commit on Super release (Stage 7, Phase 3)
+            // Runs on the *physical* Super key specifically (not
+            // `mods.logo`, which by this point could reflect a sticky
+            // latch rather than an actual key event) -- releasing the
+            // modifier that opened the switcher is what commits the
+            // selected window, same as every other Alt/Super-Tab
+            // implementation. See the Super+Tab handler further down
+            // for how `switcher_active`/`switcher_index` get set.
+            // --------------------------------------------------------
+            let is_logo_key = matches!(keysym.raw(), keysyms::KEY_Super_L | keysyms::KEY_Super_R);
+            if is_logo_key && key_state == KeyState::Released && state.switcher_active {
+                if let Some(window) = state.switcher_windows.get(state.switcher_index).cloned() {
+                    crate::wm::set_focus(state, Some(window));
+                }
+                state.switcher_active = false;
+                state.switcher_windows.clear();
+                state.pending_full_redraw = true;
+            }
+
             // Every check below this point sees physically-held OR
             // sticky-latched modifiers under the name `mods`, without
             // needing to touch each individual check -- see
@@ -176,6 +196,22 @@ fn dispatch_key(
             // --------------------------------------------------------
             if state.auth.active {
                 return handle_auth_input(state, keysym.into(), key_state);
+            }
+
+            // Escape cancels the task switcher without changing focus
+            // -- Super-release is the only path that *commits* it.
+            if state.switcher_active && key_state == KeyState::Pressed && keysym.raw() == keysyms::KEY_Escape {
+                state.switcher_active = false;
+                state.switcher_windows.clear();
+                state.pending_full_redraw = true;
+                return FilterResult::Intercept(());
+            }
+
+            // Escape also dismisses an open right-click context menu.
+            if state.context_menu.is_some() && key_state == KeyState::Pressed && keysym.raw() == keysyms::KEY_Escape {
+                state.context_menu = None;
+                state.pending_full_redraw = true;
+                return FilterResult::Intercept(());
             }
 
             // --------------------------------------------------------
@@ -241,6 +277,17 @@ fn dispatch_key(
             }
 
             // --------------------------------------------------------
+            // WORKSPACE OVERVIEW (Stage 7, Phase 3)
+            // While open, captures arrows/Enter/Escape -- opened via
+            // Super+O below, which (like Super+D/K/S) still needs the
+            // `mods.logo` gate further down since *opening* it is a
+            // held-modifier shortcut; once open, navigating it is not.
+            // --------------------------------------------------------
+            if state.overview_output.is_some() {
+                return handle_overview_input(state, keysym.into(), key_state);
+            }
+
+            // --------------------------------------------------------
             // DOCK KEYBOARD NAVIGATION (Stage 7)
             // While focused, captures Left/Right/Enter/Escape; mirrors
             // how the launcher results list captures input above.
@@ -266,6 +313,19 @@ fn dispatch_key(
             if mods.logo && keysym == keysyms::KEY_k.into() {
                 state.osk_visible = !state.osk_visible;
                 state.pending_full_redraw = true;
+                return FilterResult::Intercept(());
+            }
+
+            // Super + S: toggle Quick Settings.
+            if mods.logo && keysym == keysyms::KEY_s.into() {
+                state.quick_settings_visible = !state.quick_settings_visible;
+                state.pending_full_redraw = true;
+                return FilterResult::Intercept(());
+            }
+
+            // Super + O: toggle the workspace overview.
+            if mods.logo && keysym == keysyms::KEY_o.into() {
+                state.toggle_overview();
                 return FilterResult::Intercept(());
             }
 
@@ -407,9 +467,30 @@ fn dispatch_key(
                     return FilterResult::Intercept(());
                 }
 
-                // Super + Tab: Cycle focus through mapped windows
+                // Super + Tab / Super + Shift + Tab: task switcher
+                // (Stage 7, Phase 3) -- opens (or advances) an overlay
+                // rather than committing focus immediately; see the
+                // Super-key-release handling near the top of this
+                // closure for where the switch actually happens.
                 if keysym == keysyms::KEY_Tab.into() {
-                    crate::wm::cycle_focus(state);
+                    if !state.switcher_active {
+                        state.switcher_windows = state.space.elements().cloned().collect();
+                        state.switcher_index = state
+                            .focused_window
+                            .as_ref()
+                            .and_then(|f| state.switcher_windows.iter().position(|w| w == f))
+                            .unwrap_or(0);
+                        state.switcher_active = true;
+                    }
+
+                    if !state.switcher_windows.is_empty() {
+                        let len = state.switcher_windows.len() as i32;
+                        let step: i32 = if mods.shift { -1 } else { 1 };
+                        state.switcher_index =
+                            (state.switcher_index as i32 + step).rem_euclid(len) as usize;
+                    }
+
+                    state.pending_full_redraw = true;
                     return FilterResult::Intercept(());
                 }
 
@@ -460,6 +541,42 @@ fn dispatch_key(
 /// Handles typing, navigation, and execution inside the open launcher.
 /// Handles Left/Right/Enter/Escape while the dock has keyboard focus
 /// (Stage 7 dock keyboard navigation -- see `MitosShell::dock_focused`).
+/// Handles arrows/Enter/Escape while the workspace overview is open
+/// (Stage 7, Phase 3 -- see `overview.rs`). Cells are indexed
+/// 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right, so
+/// left/right is +-1 and up/down is +-2, both wrapping.
+fn handle_overview_input(
+    state: &mut MitosGuiState,
+    keysym: Keysym,
+    key_state: KeyState,
+) -> FilterResult<()> {
+    if key_state != KeyState::Pressed {
+        return FilterResult::Intercept(());
+    }
+
+    let count = crate::state::WORKSPACE_COUNT as i32;
+    let sel = state.overview_selected as i32;
+
+    match keysym.raw() {
+        keysyms::KEY_Escape => {
+            state.overview_output = None;
+        }
+        keysyms::KEY_Left => state.overview_selected = (sel - 1).rem_euclid(count) as usize,
+        keysyms::KEY_Right => state.overview_selected = (sel + 1).rem_euclid(count) as usize,
+        keysyms::KEY_Up => state.overview_selected = (sel - 2).rem_euclid(count) as usize,
+        keysyms::KEY_Down => state.overview_selected = (sel + 2).rem_euclid(count) as usize,
+        keysyms::KEY_Return | keysyms::KEY_space => {
+            if let Some(output) = state.overview_output.take() {
+                state.switch_workspace(&output, state.overview_selected);
+            }
+        }
+        _ => {}
+    }
+
+    state.pending_full_redraw = true;
+    FilterResult::Intercept(())
+}
+
 fn handle_dock_focus_input(
     state: &mut MitosGuiState,
     keysym: Keysym,

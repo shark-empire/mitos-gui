@@ -341,6 +341,7 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     let mut shell_text = crate::renderer::ShellTextState::new();
     let mut window_chrome = crate::renderer::WindowChrome::new();
     let mut tray = crate::renderer::TrayState::new();
+    let mut overlay_text = crate::renderer::OverlayTextState::new();
 
     let mut top_bar_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
     let mut launcher_glass = crate::renderer::create_glass_panel_element(&mut renderer_rc.borrow_mut())?;
@@ -400,6 +401,15 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         if state.notifications.tick() { state.pending_full_redraw = true; }
         state.poll_dbus();
         state.poll_session_ipc();
+        // Mirrors main.rs's loop: the AT-SPI tree sync and the
+        // lock-screen overlay cleanup (see `MitosGuiState::
+        // dismiss_transient_overlays`) both have to run on the real
+        // hardware path too, not just the winit dev backend.
+        state.refresh_accessibility_summary();
+        if state.auth.active {
+            state.dismiss_transient_overlays();
+        }
+        if overlay_text.refresh(&state) { full_redraw_frames = full_redraw_frames.max(1); }
 
         if state.drm_vblank || full_redraw_frames > 0 {
             state.drm_vblank = false;
@@ -468,7 +478,8 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
                     &state.notifications.active, &mut notification_glass, top_bar_height, &state.auth,
                     &mut auth_glass, &mut auth_glass_critical,
                     current_ws, &output_name, state.workspace_swipe_x, output_size.w,
-                    &state.osd, state.night_light,&Animation,
+                    &state.osd, state.night_light, &state.night_light_anim,
+                    &state, &overlay_text,
                 ) {
                     Ok(e) => e,
                     Err(err) => { tracing::warn!("MITOS GUI: frame build error: {err}"); continue; }

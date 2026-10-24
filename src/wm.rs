@@ -210,24 +210,6 @@ pub fn set_focus(state: &mut MitosGuiState, window: Option<Window>) {
     crate::shell_interaction::update_running_state(state);
 }
 
-/// Cycle focus through mapped windows (Super+Tab).
-pub fn cycle_focus(state: &mut MitosGuiState) {
-    let windows: Vec<Window> = state.space.elements().cloned().collect();
-
-    if windows.is_empty() {
-        return;
-    }
-
-    let next = state
-        .focused_window
-        .as_ref()
-        .and_then(|f| windows.iter().position(|w| w == f))
-        .map(|i| (i + 1) % windows.len())
-        .unwrap_or(0);
-
-    set_focus(state, Some(windows[next].clone()));
-}
-
 // ============================================================================
 // WINDOW OPERATIONS
 // ============================================================================

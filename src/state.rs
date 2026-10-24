@@ -284,6 +284,37 @@ pub struct MitosGuiState {
     /// (separate from the physical keyboard's -- see `osk.rs`).
     pub osk_visible: bool,
     pub osk_shift: bool,
+    /// Stage 7 (Phase 3): Quick Settings panel visibility.
+    pub quick_settings_visible: bool,
+    /// Stage 7 (Phase 3): task switcher (Super+Tab) overlay. `active`
+    /// while Super is held after the first Tab press; the window list
+    /// is snapshotted at that moment (see `keyboard.rs`'s Super+Tab
+    /// handling) so it doesn't shift under you mid-cycle, and only
+    /// actually changes focus when Super is released.
+    pub switcher_active: bool,
+    pub switcher_windows: Vec<smithay::desktop::Window>,
+    pub switcher_index: usize,
+    /// Stage 7 (Phase 3): workspace overview (Super+O). `Some(name)`
+    /// while open, naming the output it was opened on -- it only
+    /// draws on that output, so on a multi-monitor setup it appears
+    /// where you invoked it rather than on every screen at once.
+    pub overview_output: Option<String>,
+    /// Which workspace cell the keyboard has selected (arrows move it,
+    /// Enter confirms). Starts on the current workspace when opened.
+    pub overview_selected: usize,
+    /// Stage 7 (Phase 3): desktop icons -- see `desktop_icons.rs`.
+    /// Discovered once at startup and on an explicit "Refresh"/"New
+    /// Folder" from the context menu, not polled continuously (there's
+    /// no filesystem watcher on `~/Desktop`).
+    pub desktop_icons: Vec<crate::desktop_icons::DesktopIcon>,
+    pub desktop_icon_selected: Option<usize>,
+    /// For double-click detection: when the desktop was last
+    /// single-clicked and which icon index (if any) that landed on --
+    /// a second click on the *same* icon within the threshold (see
+    /// `pointer.rs`) opens it.
+    pub last_desktop_click: Option<(Instant, Option<usize>)>,
+    /// Stage 7 (Phase 3): the open right-click context menu, if any.
+    pub context_menu: Option<crate::context_menu::ContextMenu>,
     /// Stage 7: last-seen launcher/auth visibility, so
     /// `refresh_accessibility_summary` can tell a transition (worth an
     /// AT-SPI `StateChanged` announcement) from "still open this frame
@@ -420,6 +451,16 @@ impl MitosGuiState {
 
             osk_visible: home_screen.on_screen_keyboard,
             osk_shift: false,
+            quick_settings_visible: false,
+            switcher_active: false,
+            switcher_windows: Vec::new(),
+            switcher_index: 0,
+            overview_output: None,
+            overview_selected: 0,
+            desktop_icons: crate::desktop_icons::discover_icons(),
+            desktop_icon_selected: None,
+            last_desktop_click: None,
+            context_menu: None,
             atspi_launcher_was_visible: false,
             atspi_auth_was_active: false,
 
@@ -446,6 +487,68 @@ impl MitosGuiState {
         );
         self.pending_full_redraw = true;
         println!("MITOS GUI: Night Light {}", if self.night_light { "enabled" } else { "disabled" });
+    }
+
+    /// Puts away every transient, user-opened overlay (Quick Settings,
+    /// the workspace overview, the task switcher, a context menu).
+    /// Called while a lock/elevation prompt is up: input is gated off
+    /// then, so anything still open would just sit frozen on screen
+    /// with no way to interact with it -- and none of these belong on
+    /// top of (or behind) a lock screen to begin with. The on-screen
+    /// keyboard is deliberately *not* in this list: it's how someone
+    /// without a physical keyboard types the password.
+    pub fn dismiss_transient_overlays(&mut self) {
+        let any_open = self.quick_settings_visible
+            || self.overview_output.is_some()
+            || self.switcher_active
+            || self.context_menu.is_some();
+        if !any_open {
+            return;
+        }
+
+        self.quick_settings_visible = false;
+        self.overview_output = None;
+        self.switcher_active = false;
+        self.switcher_windows.clear();
+        self.context_menu = None;
+        self.pending_full_redraw = true;
+    }
+
+    /// Open the workspace overview on the active output, or close it
+    /// if it's already open (Super+O). Opens with the current
+    /// workspace preselected, and puts away Quick Settings so two
+    /// overlays don't end up stacked on top of each other.
+    pub fn toggle_overview(&mut self) {
+        if self.overview_output.is_some() {
+            self.overview_output = None;
+        } else {
+            let name = self.active_output_name();
+            self.overview_selected = self
+                .current_workspace
+                .get(&name)
+                .copied()
+                .unwrap_or(0)
+                .min(WORKSPACE_COUNT - 1);
+            self.overview_output = Some(name);
+            self.quick_settings_visible = false;
+        }
+        self.pending_full_redraw = true;
+    }
+
+    /// Toggle dark/light mode from Quick Settings. Unlike `home.conf`'s
+    /// `theme_mode` key (read once at startup/reload), this takes
+    /// effect immediately via the same `apply_runtime` path a config
+    /// file change already goes through -- so every place already
+    /// reading `MitosTheme::is_dark_mode()`/`effective_*` picks it up
+    /// with no further wiring.
+    pub fn toggle_theme_mode(&mut self) {
+        self.home_screen.theme_mode = if self.home_screen.theme_mode == "dark" {
+            "light".to_string()
+        } else {
+            "dark".to_string()
+        };
+        crate::theme::MitosTheme::apply_runtime(&self.home_screen);
+        self.pending_full_redraw = true;
     }
 
     /// Re-poll kernel status every 5 seconds.
@@ -765,6 +868,31 @@ pub fn remove_output(&mut self, output: &Output) {
             } else {
                 "Authentication requested".to_string()
             });
+        }
+
+        if self.quick_settings_visible {
+            parts.push("Quick Settings open".to_string());
+        }
+        if self.switcher_active {
+            let title = self
+                .switcher_windows
+                .get(self.switcher_index)
+                .and_then(|w| crate::shell_interaction::window_title(w))
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| "Window".to_string());
+            parts.push(format!("Task switcher: {title}"));
+        }
+        if self.overview_output.is_some() {
+            parts.push(format!(
+                "Workspace overview: workspace {} selected",
+                self.overview_selected + 1
+            ));
+        }
+        if self.context_menu.is_some() {
+            parts.push("Context menu open".to_string());
+        }
+        if self.osk_visible {
+            parts.push("On-screen keyboard shown".to_string());
         }
 
         let description = if parts.is_empty() {

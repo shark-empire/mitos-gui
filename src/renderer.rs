@@ -2560,6 +2560,771 @@ pub fn collect_osk_elements(
     elements
 }
 
+/// Pre-rendered/cached text for the Quick Settings panel. Static
+/// labels ("Volume", "Dark Mode", ...) are rendered once, since they
+/// never change; the info line and the two percentage readouts are
+/// re-rendered only when their text actually changes, same
+/// change-detection pattern `ShellTextState` uses for the clock.
+pub struct QuickSettingsTextState {
+    text_renderer: crate::text::TextRenderer,
+
+    label_volume: Option<crate::text::TextTexture>,
+    label_brightness: Option<crate::text::TextTexture>,
+    label_night_light: Option<crate::text::TextTexture>,
+    label_dark_mode: Option<crate::text::TextTexture>,
+    label_dnd: Option<crate::text::TextTexture>,
+    label_settings: Option<crate::text::TextTexture>,
+    label_mute: Option<crate::text::TextTexture>,
+
+    info_string: String,
+    info_tex: Option<crate::text::TextTexture>,
+    volume_pct_string: String,
+    volume_pct_tex: Option<crate::text::TextTexture>,
+    brightness_pct_string: String,
+    brightness_pct_tex: Option<crate::text::TextTexture>,
+}
+
+impl QuickSettingsTextState {
+    pub fn new() -> Self {
+        let text_renderer = crate::text::TextRenderer::new();
+        let color = MitosTheme::TEXT.to_u8();
+        let render = |s: &str| {
+            text_renderer.render(s, 13.0, color).and_then(crate::text::TextTexture::from_rgba)
+        };
+
+        Self {
+            label_volume: render("Volume"),
+            label_brightness: render("Brightness"),
+            label_night_light: render("Night Light"),
+            label_dark_mode: render("Dark Mode"),
+            label_dnd: render("Do Not Disturb"),
+            label_settings: render("Settings"),
+            label_mute: render("Mute"),
+            info_string: String::new(),
+            info_tex: None,
+            volume_pct_string: String::new(),
+            volume_pct_tex: None,
+            brightness_pct_string: String::new(),
+            brightness_pct_tex: None,
+            text_renderer,
+        }
+    }
+
+    /// Refreshes the dynamic bits (info line, volume%, brightness%).
+    /// Returns true if anything actually changed (triggers a redraw).
+    pub fn refresh(&mut self, state: &crate::state::MitosGuiState) -> bool {
+        let mut changed = false;
+
+        let info = match state.network {
+            crate::status::NetworkStatus::Offline => "Offline".to_string(),
+            crate::status::NetworkStatus::Ethernet => "Ethernet connected".to_string(),
+            crate::status::NetworkStatus::Wifi(signal) => format!("Wi-Fi {signal}%"),
+        };
+        let info = match state.battery {
+            Some(b) => format!("{info} - Battery {}%{}", b.capacity, if b.charging { " (charging)" } else { "" }),
+            None => info,
+        };
+        if info != self.info_string {
+            self.info_string = info.clone();
+            self.info_tex = self
+                .text_renderer
+                .render(&info, 12.0, MitosTheme::effective_text_muted().to_u8())
+                .and_then(crate::text::TextTexture::from_rgba);
+            changed = true;
+        }
+
+        let volume_pct = if state.muted { "Muted".to_string() } else { format!("{}%", state.volume) };
+        if volume_pct != self.volume_pct_string {
+            self.volume_pct_string = volume_pct.clone();
+            self.volume_pct_tex = self
+                .text_renderer
+                .render(&volume_pct, 12.0, MitosTheme::effective_text_muted().to_u8())
+                .and_then(crate::text::TextTexture::from_rgba);
+            changed = true;
+        }
+
+        let brightness_pct = format!("{}%", state.brightness);
+        if brightness_pct != self.brightness_pct_string {
+            self.brightness_pct_string = brightness_pct.clone();
+            self.brightness_pct_tex = self
+                .text_renderer
+                .render(&brightness_pct, 12.0, MitosTheme::effective_text_muted().to_u8())
+                .and_then(crate::text::TextTexture::from_rgba);
+            changed = true;
+        }
+
+        changed
+    }
+}
+
+/// Collect the Quick Settings panel's glass background, labels,
+/// sliders, toggles, and the settings button. Geometry comes from
+/// `quick_settings::compute_geometry`, the same function
+/// `pointer.rs`'s click hit-testing uses.
+pub fn collect_quick_settings_elements(
+    renderer: &mut GlesRenderer,
+    text: &QuickSettingsTextState,
+    state: &crate::state::MitosGuiState,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    use crate::quick_settings::{compute_geometry, QsControl};
+
+    let mut elements = Vec::new();
+
+    let top_bar_h = state.shell.top_bar.map(|p| p.size.1).unwrap_or(0);
+    let (panel, controls) = compute_geometry(output_size, top_bar_h);
+
+    let bg = MitosTheme::effective_glass();
+    let panel_buf = SolidColorBuffer::new(
+        (panel.size.w, panel.size.h),
+        Color32F::new(bg.r, bg.g, bg.b, (bg.a + 0.15).min(1.0)),
+    );
+    elements.extend(panel_buf.render_elements(renderer, (panel.loc.x, panel.loc.y).into(), scale, 1.0));
+
+    let border = MitosTheme::effective_border();
+    let border_buf = SolidColorBuffer::new(
+        (panel.size.w, 2),
+        Color32F::new(border.r, border.g, border.b, border.a),
+    );
+    elements.extend(border_buf.render_elements(renderer, (panel.loc.x, panel.loc.y).into(), scale, 1.0));
+
+    // The live network/battery info line.
+    if let Some(tex) = &text.info_tex {
+        if let Ok(el) = tex.element(renderer, (panel.loc.x + 12, panel.loc.y + 12 + 22)) {
+            elements.push(ChromeRenderElement::Buffer(el));
+        }
+    }
+
+    let find = |c: QsControl| controls.iter().find(|(cc, _)| *cc == c).map(|(_, r)| *r);
+
+    // Volume: label, percentage/mute readout, slider track + fill, mute button.
+    if let Some(rect) = find(QsControl::VolumeSlider) {
+        if let Some(tex) = &text.label_volume {
+            if let Ok(el) = tex.element(renderer, (rect.loc.x, rect.loc.y - 20)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+        if let Some(tex) = &text.volume_pct_tex {
+            let tx = rect.loc.x + rect.size.w - tex.size.w;
+            if let Ok(el) = tex.element(renderer, (tx, rect.loc.y - 20)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+        draw_slider(&mut elements, renderer, scale, rect, if state.muted { 0 } else { state.volume });
+    }
+    if let Some(rect) = find(QsControl::MuteToggle) {
+        let c = if state.muted { MitosTheme::effective_accent() } else { crate::theme::Color::rgba(1.0, 1.0, 1.0, 0.10) };
+        let buf = SolidColorBuffer::new((rect.size.w, rect.size.h), Color32F::new(c.r, c.g, c.b, c.a.max(0.10)));
+        elements.extend(buf.render_elements(renderer, (rect.loc.x, rect.loc.y).into(), scale, 1.0));
+        if let Some(tex) = &text.label_mute {
+            let tx = rect.loc.x + (rect.size.w - tex.size.w) / 2;
+            let ty = rect.loc.y + (rect.size.h - tex.size.h) / 2;
+            if let Ok(el) = tex.element(renderer, (tx, ty)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+    }
+
+    // Brightness: label, percentage readout, slider.
+    if let Some(rect) = find(QsControl::BrightnessSlider) {
+        if let Some(tex) = &text.label_brightness {
+            if let Ok(el) = tex.element(renderer, (rect.loc.x, rect.loc.y - 20)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+        if let Some(tex) = &text.brightness_pct_tex {
+            let tx = rect.loc.x + rect.size.w - tex.size.w;
+            if let Ok(el) = tex.element(renderer, (tx, rect.loc.y - 20)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+        draw_slider(&mut elements, renderer, scale, rect, state.brightness);
+    }
+
+    // Toggles: Night Light, Dark Mode, Do Not Disturb.
+    let toggles: [(QsControl, bool, &Option<crate::text::TextTexture>); 3] = [
+        (QsControl::NightLightToggle, state.night_light, &text.label_night_light),
+        (QsControl::DarkModeToggle, state.home_screen.theme_mode != "dark", &text.label_dark_mode),
+        (QsControl::DndToggle, state.notifications.dnd, &text.label_dnd),
+    ];
+    for (control, active, label) in toggles {
+        if let Some(rect) = find(control) {
+            let c = if active { MitosTheme::effective_accent() } else { crate::theme::Color::rgba(1.0, 1.0, 1.0, 0.10) };
+            let buf = SolidColorBuffer::new((rect.size.w, rect.size.h), Color32F::new(c.r, c.g, c.b, c.a.max(0.10)));
+            elements.extend(buf.render_elements(renderer, (rect.loc.x, rect.loc.y).into(), scale, 1.0));
+            if let Some(tex) = label {
+                let tx = rect.loc.x + ((rect.size.w - tex.size.w) / 2).max(4);
+                let ty = rect.loc.y + (rect.size.h - tex.size.h) / 2;
+                if let Ok(el) = tex.element(renderer, (tx, ty)) {
+                    elements.push(ChromeRenderElement::Buffer(el));
+                }
+            }
+        }
+    }
+
+    // Settings button.
+    if let Some(rect) = find(QsControl::SettingsButton) {
+        let buf = SolidColorBuffer::new((rect.size.w, rect.size.h), Color32F::new(1.0, 1.0, 1.0, 0.10));
+        elements.extend(buf.render_elements(renderer, (rect.loc.x, rect.loc.y).into(), scale, 1.0));
+        if let Some(tex) = &text.label_settings {
+            let tx = rect.loc.x + (rect.size.w - tex.size.w) / 2;
+            let ty = rect.loc.y + (rect.size.h - tex.size.h) / 2;
+            if let Ok(el) = tex.element(renderer, (tx, ty)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+    }
+
+    elements
+}
+
+/// Draws one slider track (dim full-width bar) with a filled portion
+/// (accent-colored, `value` percent of the width) on top -- shared by
+/// the volume and brightness rows above.
+fn draw_slider(
+    elements: &mut Vec<ChromeRenderElement>,
+    renderer: &mut GlesRenderer,
+    scale: Scale<f64>,
+    rect: Rectangle<i32, Logical>,
+    value: u8,
+) {
+    let track = SolidColorBuffer::new((rect.size.w, rect.size.h), Color32F::new(1.0, 1.0, 1.0, 0.12));
+    elements.extend(track.render_elements(renderer, (rect.loc.x, rect.loc.y).into(), scale, 1.0));
+
+    let fill_w = ((rect.size.w as f32) * (value.min(100) as f32 / 100.0)).round() as i32;
+    if fill_w > 0 {
+        let accent = MitosTheme::effective_accent();
+        let fill = SolidColorBuffer::new(
+            (fill_w, rect.size.h),
+            Color32F::new(accent.r, accent.g, accent.b, 0.9),
+        );
+        elements.extend(fill.render_elements(renderer, (rect.loc.x, rect.loc.y).into(), scale, 1.0));
+    }
+}
+
+/// Cached, change-detected title textures for the task switcher
+/// overlay. Titles are only known once the switcher opens (there's no
+/// "static label" equivalent the way the OSK/Quick Settings have), so
+/// unlike those this re-renders its whole set whenever the visible
+/// title list changes at all, rather than tracking each one
+/// individually -- the switcher is only open briefly and the list is
+/// small, so this is cheap enough not to need finer-grained caching.
+pub struct SwitcherTextState {
+    text_renderer: crate::text::TextRenderer,
+    titles: Vec<String>,
+    textures: Vec<Option<crate::text::TextTexture>>,
+}
+
+impl SwitcherTextState {
+    pub fn new() -> Self {
+        Self {
+            text_renderer: crate::text::TextRenderer::new(),
+            titles: Vec::new(),
+            textures: Vec::new(),
+        }
+    }
+
+    /// Returns true if the title list actually changed (triggers a redraw).
+    pub fn refresh(&mut self, titles: &[String]) -> bool {
+        if titles == self.titles.as_slice() {
+            return false;
+        }
+
+        self.titles = titles.to_vec();
+
+        let mut textures = Vec::with_capacity(titles.len());
+        for t in titles {
+            textures.push(
+                self.text_renderer
+                    .render(t, 13.0, MitosTheme::TEXT.to_u8())
+                    .and_then(crate::text::TextTexture::from_rgba),
+            );
+        }
+        self.textures = textures;
+
+        true
+    }
+}
+
+/// Collect the task switcher overlay: a dim backdrop, then one card
+/// per window (a colored swatch standing in for a real thumbnail/icon
+/// -- see `icon_swatch_color`'s doc for why -- plus its title), with
+/// the selected card outlined the same way dock keyboard-focus is.
+pub fn collect_switcher_elements(
+    renderer: &mut GlesRenderer,
+    text: &SwitcherTextState,
+    count: usize,
+    selected: usize,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+    if count == 0 {
+        return elements;
+    }
+
+    // Dim backdrop so the switcher reads as modal, same idea as the
+    // auth prompt's (see `collect_auth_elements`), just lighter since
+    // this isn't security-sensitive.
+    let dim = SolidColorBuffer::new(output_size, Color32F::new(0.0, 0.0, 0.0, 0.35));
+    elements.extend(dim.render_elements(renderer, (0, 0).into(), scale, 1.0));
+
+    const CARD_W: i32 = 140;
+    const CARD_H: i32 = 108;
+    const SWATCH: i32 = 76;
+    const GAP: i32 = 16;
+
+    let total_w = count as i32 * CARD_W + (count as i32 - 1).max(0) * GAP;
+    let start_x = (output_size.w - total_w) / 2;
+    let y = (output_size.h - CARD_H) / 2;
+
+    for i in 0..count {
+        let x = start_x + i as i32 * (CARD_W + GAP);
+        let swatch_x = x + (CARD_W - SWATCH) / 2;
+
+        let title = text.titles.get(i).map(|s| s.as_str()).unwrap_or("Window");
+        let (r, g, b) = icon_swatch_color(title);
+        let alpha = if i == selected { 0.9 } else { 0.55 };
+        let swatch = SolidColorBuffer::new((SWATCH, SWATCH), Color32F::new(r, g, b, alpha));
+        elements.extend(swatch.render_elements(renderer, (swatch_x, y).into(), scale, 1.0));
+
+        if i == selected {
+            let a = MitosTheme::effective_accent();
+            let ring_color = Color32F::new(a.r, a.g, a.b, 0.95);
+            let pad = 6;
+            let thickness = 3;
+            let rx = swatch_x - pad;
+            let ry = y - pad;
+            let rw = SWATCH + pad * 2;
+            let rh = SWATCH + pad * 2;
+
+            let top = SolidColorBuffer::new((rw, thickness), ring_color);
+            elements.extend(top.render_elements(renderer, (rx, ry).into(), scale, 1.0));
+            let bottom = SolidColorBuffer::new((rw, thickness), ring_color);
+            elements.extend(bottom.render_elements(renderer, (rx, ry + rh - thickness).into(), scale, 1.0));
+            let left = SolidColorBuffer::new((thickness, rh), ring_color);
+            elements.extend(left.render_elements(renderer, (rx, ry).into(), scale, 1.0));
+            let right = SolidColorBuffer::new((thickness, rh), ring_color);
+            elements.extend(right.render_elements(renderer, (rx + rw - thickness, ry).into(), scale, 1.0));
+        }
+
+        if let Some(Some(tex)) = text.textures.get(i) {
+            let tx = x + ((CARD_W - tex.size.w) / 2).max(0);
+            let ty = y + SWATCH + 10;
+            if let Ok(el) = tex.element(renderer, (tx, ty)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+    }
+
+    elements
+}
+
+/// Cached, change-detected text for the workspace overview: one
+/// header + a row of titles per workspace cell. Re-renders its whole
+/// set when anything in it changes, same reasoning as
+/// `SwitcherTextState` -- opened rarely enough that finer-grained
+/// per-row caching isn't worth the bookkeeping.
+pub struct OverviewTextState {
+    text_renderer: crate::text::TextRenderer,
+    workspaces: Vec<Vec<String>>,
+    headers: Vec<Option<crate::text::TextTexture>>,
+    rows: Vec<Vec<Option<crate::text::TextTexture>>>,
+}
+
+impl OverviewTextState {
+    pub fn new() -> Self {
+        Self {
+            text_renderer: crate::text::TextRenderer::new(),
+            workspaces: Vec::new(),
+            headers: Vec::new(),
+            rows: Vec::new(),
+        }
+    }
+
+    /// Returns true if anything changed (triggers a redraw).
+    pub fn refresh(&mut self, workspaces: &[Vec<String>]) -> bool {
+        if workspaces == self.workspaces.as_slice() {
+            return false;
+        }
+
+        self.workspaces = workspaces.to_vec();
+
+        let mut headers = Vec::with_capacity(workspaces.len());
+        let mut rows = Vec::with_capacity(workspaces.len());
+
+        for (i, titles) in workspaces.iter().enumerate() {
+            let header_str = crate::overview::header_text(i, titles.len());
+            headers.push(
+                self.text_renderer
+                    .render(&header_str, 14.0, MitosTheme::TEXT.to_u8())
+                    .and_then(crate::text::TextTexture::from_rgba),
+            );
+
+            let mut row_texs = Vec::with_capacity(titles.len());
+            for title in titles {
+                row_texs.push(
+                    self.text_renderer
+                        .render(title, 12.0, MitosTheme::effective_text_muted().to_u8())
+                        .and_then(crate::text::TextTexture::from_rgba),
+                );
+            }
+            rows.push(row_texs);
+        }
+
+        self.headers = headers;
+        self.rows = rows;
+
+        true
+    }
+}
+
+/// Collect the workspace overview: a dim backdrop, the panel, and one
+/// cell per workspace with its window titles. Geometry comes from
+/// `overview::compute_geometry`, the same function `pointer.rs`'s
+/// click hit-testing uses.
+pub fn collect_overview_elements(
+    renderer: &mut GlesRenderer,
+    text: &OverviewTextState,
+    current_ws: usize,
+    selected_ws: usize,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+
+    let dim = SolidColorBuffer::new(output_size, Color32F::new(0.0, 0.0, 0.0, 0.45));
+    elements.extend(dim.render_elements(renderer, (0, 0).into(), scale, 1.0));
+
+    let (panel, cells) = crate::overview::compute_geometry(output_size);
+
+    let bg = MitosTheme::effective_glass();
+    let panel_buf = SolidColorBuffer::new(
+        (panel.size.w, panel.size.h),
+        Color32F::new(bg.r, bg.g, bg.b, (bg.a + 0.1).min(1.0)),
+    );
+    elements.extend(panel_buf.render_elements(renderer, (panel.loc.x, panel.loc.y).into(), scale, 1.0));
+
+    for (i, rect) in cells.iter().enumerate() {
+        let is_current = i == current_ws;
+        let is_selected = i == selected_ws;
+
+        let accent = MitosTheme::effective_accent();
+        let cell_color = if is_current {
+            Color32F::new(accent.r, accent.g, accent.b, 0.22)
+        } else {
+            Color32F::new(1.0, 1.0, 1.0, 0.08)
+        };
+        let cell_buf = SolidColorBuffer::new((rect.size.w, rect.size.h), cell_color);
+        elements.extend(cell_buf.render_elements(renderer, (rect.loc.x, rect.loc.y).into(), scale, 1.0));
+
+        if is_selected {
+            let ring_color = Color32F::new(accent.r, accent.g, accent.b, 0.95);
+            let thickness = 3;
+            let (rx, ry, rw, rh) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
+
+            let top = SolidColorBuffer::new((rw, thickness), ring_color);
+            elements.extend(top.render_elements(renderer, (rx, ry).into(), scale, 1.0));
+            let bottom = SolidColorBuffer::new((rw, thickness), ring_color);
+            elements.extend(bottom.render_elements(renderer, (rx, ry + rh - thickness).into(), scale, 1.0));
+            let left = SolidColorBuffer::new((thickness, rh), ring_color);
+            elements.extend(left.render_elements(renderer, (rx, ry).into(), scale, 1.0));
+            let right = SolidColorBuffer::new((thickness, rh), ring_color);
+            elements.extend(right.render_elements(renderer, (rx + rw - thickness, ry).into(), scale, 1.0));
+        }
+
+        if let Some(Some(header)) = text.headers.get(i) {
+            if let Ok(el) = header.element(renderer, (rect.loc.x + crate::overview::PAD, rect.loc.y + 8)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+
+        let max_rows = crate::overview::max_rows(rect.size.h);
+        if let Some(row_texs) = text.rows.get(i) {
+            for (ri, row_tex) in row_texs.iter().take(max_rows).enumerate() {
+                let ry = rect.loc.y + crate::overview::HEADER_H + ri as i32 * crate::overview::ROW_H;
+                let title = text.workspaces.get(i).and_then(|w| w.get(ri)).map(|s| s.as_str()).unwrap_or("");
+                let (r, g, b) = icon_swatch_color(title);
+                let swatch = SolidColorBuffer::new((10, 10), Color32F::new(r, g, b, 0.9));
+                elements.extend(swatch.render_elements(
+                    renderer,
+                    (rect.loc.x + crate::overview::PAD, ry + 6).into(),
+                    scale,
+                    1.0,
+                ));
+                if let Some(tex) = row_tex {
+                    if let Ok(el) = tex.element(renderer, (rect.loc.x + crate::overview::PAD + 18, ry)) {
+                        elements.push(ChromeRenderElement::Buffer(el));
+                    }
+                }
+            }
+        }
+    }
+
+    elements
+}
+
+/// Cached label textures for the desktop icons and the right-click
+/// context menu. `refresh` compares in place against what's already
+/// rendered, so on the (overwhelmingly common) frames where nothing
+/// changed it neither allocates nor re-rasterizes anything.
+pub struct DesktopTextState {
+    text_renderer: crate::text::TextRenderer,
+    icon_names: Vec<String>,
+    icon_labels: Vec<Option<crate::text::TextTexture>>,
+    menu_src: Vec<String>,
+    menu_labels: Vec<Option<crate::text::TextTexture>>,
+}
+
+impl DesktopTextState {
+    pub fn new() -> Self {
+        Self {
+            text_renderer: crate::text::TextRenderer::new(),
+            icon_names: Vec::new(),
+            icon_labels: Vec::new(),
+            menu_src: Vec::new(),
+            menu_labels: Vec::new(),
+        }
+    }
+
+    /// Returns true if any label was re-rendered (triggers a redraw).
+    /// `menu` is only looked at while a context menu is actually open;
+    /// the last menu's labels are simply left in place otherwise.
+    pub fn refresh(
+        &mut self,
+        icons: &[crate::desktop_icons::DesktopIcon],
+        menu: Option<&crate::context_menu::ContextMenu>,
+    ) -> bool {
+        let mut changed = false;
+
+        let icons_changed = icons.len() != self.icon_names.len()
+            || icons.iter().zip(self.icon_names.iter()).any(|(icon, name)| icon.name != *name);
+        if icons_changed {
+            self.icon_names = icons.iter().map(|i| i.name.clone()).collect();
+
+            let mut labels = Vec::with_capacity(icons.len());
+            for icon in icons {
+                let shown = crate::desktop_icons::display_label(&icon.name);
+                labels.push(
+                    self.text_renderer
+                        .render(&shown, 12.0, MitosTheme::TEXT.to_u8())
+                        .and_then(crate::text::TextTexture::from_rgba),
+                );
+            }
+            self.icon_labels = labels;
+            changed = true;
+        }
+
+        if let Some(menu) = menu {
+            let menu_changed = menu.items.len() != self.menu_src.len()
+                || menu
+                    .items
+                    .iter()
+                    .zip(self.menu_src.iter())
+                    .any(|((label, _), src)| label != src);
+            if menu_changed {
+                self.menu_src = menu.items.iter().map(|(label, _)| label.clone()).collect();
+
+                let mut labels = Vec::with_capacity(menu.items.len());
+                for (label, _) in &menu.items {
+                    labels.push(
+                        self.text_renderer
+                            .render(label, 13.0, MitosTheme::TEXT.to_u8())
+                            .and_then(crate::text::TextTexture::from_rgba),
+                    );
+                }
+                self.menu_labels = labels;
+                changed = true;
+            }
+        }
+
+        changed
+    }
+}
+
+/// Collect the desktop icon grid -- drawn right above the wallpaper
+/// and below everything else (windows, dock, overlays). Layout comes
+/// from `desktop_icons::layout_origin_and_rows`/`icon_position`, the
+/// same functions `pointer.rs`'s hit-testing uses.
+pub fn collect_desktop_icon_elements(
+    renderer: &mut GlesRenderer,
+    text: &DesktopTextState,
+    state: &crate::state::MitosGuiState,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+    if state.desktop_icons.is_empty() {
+        return elements;
+    }
+
+    let (top_bar_h, max_rows) = crate::desktop_icons::layout_origin_and_rows(state);
+    let (cell_w, cell_h) = crate::desktop_icons::cell_size();
+    let sw = crate::desktop_icons::SWATCH;
+    let accent = MitosTheme::effective_accent();
+
+    for (i, icon) in state.desktop_icons.iter().enumerate() {
+        let (cx, cy) = crate::desktop_icons::icon_position(i, max_rows);
+        let (x, y) = (cx, top_bar_h + cy);
+
+        if state.desktop_icon_selected == Some(i) {
+            let hl = SolidColorBuffer::new(
+                (cell_w - 8, cell_h - 8),
+                Color32F::new(accent.r, accent.g, accent.b, 0.30),
+            );
+            elements.extend(hl.render_elements(renderer, (x + 4, y + 4).into(), scale, 1.0));
+        }
+
+        let sx = x + (cell_w - sw) / 2;
+        let sy = y + 12;
+        let (r, g, b) = icon_swatch_color(&icon.name);
+
+        let swatch = SolidColorBuffer::new((sw, sw), Color32F::new(r, g, b, 0.9));
+        elements.extend(swatch.render_elements(renderer, (sx, sy).into(), scale, 1.0));
+
+        if icon.is_dir {
+            // A small tab on the top-left reads as "folder" next to
+            // the plain squares used for files.
+            let tab = SolidColorBuffer::new((sw * 2 / 5, 8), Color32F::new(r, g, b, 0.9));
+            elements.extend(tab.render_elements(renderer, (sx, sy - 8).into(), scale, 1.0));
+        }
+
+        if let Some(Some(tex)) = text.icon_labels.get(i) {
+            let lx = x + (cell_w - tex.size.w) / 2;
+            let ly = sy + sw + 6;
+
+            // Dark pill behind the label so it stays readable over
+            // any wallpaper, light or dark.
+            let pill = SolidColorBuffer::new(
+                (tex.size.w + 8, tex.size.h + 4),
+                Color32F::new(0.0, 0.0, 0.0, 0.38),
+            );
+            elements.extend(pill.render_elements(renderer, (lx - 4, ly - 2).into(), scale, 1.0));
+
+            if let Ok(el) = tex.element(renderer, (lx, ly)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+    }
+
+    elements
+}
+
+/// Collect the right-click context menu: backing panel, a thin
+/// border, and one row per item. Geometry comes from
+/// `ContextMenu::rect`/`item_rects`, the same functions `pointer.rs`'s
+/// click hit-testing uses.
+pub fn collect_context_menu_elements(
+    renderer: &mut GlesRenderer,
+    text: &DesktopTextState,
+    menu: &crate::context_menu::ContextMenu,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+    let rect = menu.rect(output_size);
+
+    let bg = MitosTheme::effective_glass();
+    let backing = SolidColorBuffer::new(
+        (rect.size.w, rect.size.h),
+        Color32F::new(bg.r, bg.g, bg.b, (bg.a + 0.25).min(1.0)),
+    );
+    elements.extend(backing.render_elements(renderer, (rect.loc.x, rect.loc.y).into(), scale, 1.0));
+
+    let border = MitosTheme::effective_border();
+    let border_color = Color32F::new(border.r, border.g, border.b, border.a);
+    let t = 1;
+    let (rx, ry, rw, rh) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
+    let top = SolidColorBuffer::new((rw, t), border_color);
+    elements.extend(top.render_elements(renderer, (rx, ry).into(), scale, 1.0));
+    let bottom = SolidColorBuffer::new((rw, t), border_color);
+    elements.extend(bottom.render_elements(renderer, (rx, ry + rh - t).into(), scale, 1.0));
+    let left = SolidColorBuffer::new((t, rh), border_color);
+    elements.extend(left.render_elements(renderer, (rx, ry).into(), scale, 1.0));
+    let right = SolidColorBuffer::new((t, rh), border_color);
+    elements.extend(right.render_elements(renderer, (rx + rw - t, ry).into(), scale, 1.0));
+
+    for (i, row) in menu.item_rects(output_size).iter().enumerate() {
+        let row_buf = SolidColorBuffer::new(
+            (row.size.w, (row.size.h - 2).max(1)),
+            Color32F::new(1.0, 1.0, 1.0, 0.06),
+        );
+        elements.extend(row_buf.render_elements(renderer, (row.loc.x, row.loc.y).into(), scale, 1.0));
+
+        if let Some(Some(tex)) = text.menu_labels.get(i) {
+            let ty = row.loc.y + (row.size.h - tex.size.h) / 2;
+            if let Ok(el) = tex.element(renderer, (row.loc.x + 10, ty)) {
+                elements.push(ChromeRenderElement::Buffer(el));
+            }
+        }
+    }
+
+    elements
+}
+
+/// Every overlay's cached text, bundled so both frame loops (the winit
+/// dev backend in `main.rs` and the real-hardware one in
+/// `drm_backend.rs`) set up and refresh them through one call each,
+/// instead of each loop separately knowing about -- and needing
+/// editing for -- every overlay. That duplication is exactly how the
+/// DRM loop ended up still calling `collect_frame_elements` with its
+/// original argument list after several rounds of added overlays.
+pub struct OverlayTextState {
+    pub osk: OskTextState,
+    pub quick_settings: QuickSettingsTextState,
+    pub switcher: SwitcherTextState,
+    pub overview: OverviewTextState,
+    pub desktop: DesktopTextState,
+}
+
+impl OverlayTextState {
+    pub fn new() -> Self {
+        Self {
+            osk: OskTextState::new(),
+            quick_settings: QuickSettingsTextState::new(),
+            switcher: SwitcherTextState::new(),
+            overview: OverviewTextState::new(),
+            desktop: DesktopTextState::new(),
+        }
+    }
+
+    /// Re-rasterizes whichever overlays are currently open and have
+    /// changed (the on-screen keyboard's labels are static, so it has
+    /// nothing to refresh). Returns true if anything was
+    /// re-rasterized, i.e. the caller should redraw.
+    pub fn refresh(&mut self, state: &crate::state::MitosGuiState) -> bool {
+        let mut changed = false;
+
+        if state.quick_settings_visible && self.quick_settings.refresh(state) {
+            changed = true;
+        }
+
+        if state.switcher_active {
+            let titles: Vec<String> = state
+                .switcher_windows
+                .iter()
+                .map(|w| crate::shell_interaction::window_title(w).unwrap_or_else(|| "Window".to_string()))
+                .collect();
+            if self.switcher.refresh(&titles) {
+                changed = true;
+            }
+        }
+
+        if let Some(output_name) = state.overview_output.as_deref() {
+            let workspaces = crate::overview::collect_workspaces(state, output_name);
+            if self.overview.refresh(&workspaces) {
+                changed = true;
+            }
+        }
+
+        if self.desktop.refresh(&state.desktop_icons, state.context_menu.as_ref()) {
+            changed = true;
+        }
+
+        changed
+    }
+}
+
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
@@ -2592,9 +3357,8 @@ pub fn collect_frame_elements(
     osd: &crate::state::OsdState,
     night_light: bool,
     night_light_anim: &crate::animation::Animation,
-    osk_text: &OskTextState,
-    osk_visible: bool,
-    osk_shift: bool,
+    full_state: &crate::state::MitosGuiState,
+    overlays: &OverlayTextState,
 ) -> Result<Vec<ChromeRenderElement>, GlesError> {
     let mut elements = Vec::new();
 
@@ -2604,6 +3368,22 @@ pub fn collect_frame_elements(
     let wallpaper_element = wallpaper.render_element(renderer, output_size)?;
 
     elements.push(ChromeRenderElement::Buffer(wallpaper_element));
+
+    // ------------------------------------------------------------
+    // 1.5 DESKTOP ICONS (Stage 7, Phase 3) -- right above the
+    // wallpaper, below everything else. Primary output only: their
+    // layout is anchored to the shell panels, which describe that one
+    // output (see `desktop_icons.rs`'s module doc).
+    // ------------------------------------------------------------
+    let is_primary_output = full_state
+        .outputs
+        .first()
+        .map(|o| o.name())
+        .as_deref()
+        == Some(output_name);
+    if is_primary_output {
+        elements.extend(collect_desktop_icon_elements(renderer, &overlays.desktop, full_state, scale));
+    }
 
     // ------------------------------------------------------------
     // 2. MITOS SHELL (Dock + top bar)
@@ -2674,6 +3454,15 @@ pub fn collect_frame_elements(
     elements.extend(overlay_elements);
 
     // ------------------------------------------------------------
+    // 5.9 CONTEXT MENU (Stage 7, Phase 3) -- deliberately drawn before
+    // (so beneath) the authentication overlay below, which must stay
+    // on top of everything it can end up sharing the screen with.
+    // ------------------------------------------------------------
+    if let Some(menu) = full_state.context_menu.as_ref() {
+        elements.extend(collect_context_menu_elements(renderer, &overlays.desktop, menu, output_size, scale));
+    }
+
+    // ------------------------------------------------------------
     // 6. SECURE AUTHENTICATION OVERLAY
     // ------------------------------------------------------------
     elements.extend(collect_auth_elements(renderer, auth, output_size, scale, auth_glass, auth_glass_critical));
@@ -2686,8 +3475,47 @@ pub fn collect_frame_elements(
     // ------------------------------------------------------------
     // 8. ON-SCREEN KEYBOARD (Stage 7)
     // ------------------------------------------------------------
-    if osk_visible {
-        elements.extend(collect_osk_elements(renderer, osk_text, osk_shift, output_size, scale));
+    if full_state.osk_visible {
+        elements.extend(collect_osk_elements(renderer, &overlays.osk, full_state.osk_shift, output_size, scale));
+    }
+
+    // ------------------------------------------------------------
+    // 9. QUICK SETTINGS (Stage 7, Phase 3)
+    // ------------------------------------------------------------
+    if full_state.quick_settings_visible {
+        elements.extend(collect_quick_settings_elements(renderer, &overlays.quick_settings, full_state, output_size, scale));
+    }
+
+    // ------------------------------------------------------------
+    // 10. TASK SWITCHER (Stage 7, Phase 3)
+    // ------------------------------------------------------------
+    if full_state.switcher_active {
+        elements.extend(collect_switcher_elements(
+            renderer,
+            &overlays.switcher,
+            full_state.switcher_windows.len(),
+            full_state.switcher_index,
+            output_size,
+            scale,
+        ));
+    }
+
+    // ------------------------------------------------------------
+    // 11. WORKSPACE OVERVIEW (Stage 7, Phase 3)
+    // ------------------------------------------------------------
+    // Only on the output it was opened on -- `overview_output` names it
+    // (the earlier plumbing passed a bare "is it open" flag, so on a
+    // multi-monitor setup it would have drawn on every screen at once).
+    if full_state.overview_output.as_deref() == Some(output_name) {
+        let current = full_state.current_workspace.get(output_name).copied().unwrap_or(0);
+        elements.extend(collect_overview_elements(
+            renderer,
+            &overlays.overview,
+            current,
+            full_state.overview_selected,
+            output_size,
+            scale,
+        ));
     }
 
     Ok(elements)

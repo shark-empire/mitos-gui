@@ -160,6 +160,25 @@ fn app_id_for_window(window: &Window) -> Option<String> {
     })
 }
 
+/// Extract a window's title from its toplevel surface, for anything
+/// that needs to *show* a window (the task switcher, the workspace
+/// overview) rather than just match it against a dock entry the way
+/// `app_id_for_window` above does. Same proven access pattern, just
+/// reading `title` instead of `app_id` off the same toplevel state.
+pub fn window_title(window: &Window) -> Option<String> {
+    let toplevel = window.toplevel()?;
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .title
+            .clone()
+    })
+}
+
 /// Map an XDG app-id to a MITOS dock ID.
 fn dock_id_for_app_id(app_id: &str) -> Option<&'static str> {
     let a = app_id.to_ascii_lowercase();
