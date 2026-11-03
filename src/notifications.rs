@@ -57,12 +57,19 @@ impl NotificationManager {
     /// Push a new notification to the screen (or straight to history,
     /// under Do Not Disturb -- see the `dnd` field).
     pub fn push(&mut self, app_name: &str, title: &str, body: &str) {
-        let title_tex = self.text_renderer
-            .render(title, 16.0, crate::theme::MitosTheme::TEXT.to_u8())
-            .and_then(TextTexture::from_rgba);
-        let body_tex = self.text_renderer
-            .render(body, 14.0, crate::theme::MitosTheme::effective_text_muted().to_u8())
-            .and_then(TextTexture::from_rgba);
+        // Under Do Not Disturb the notification goes straight to history,
+        // which keeps text only -- so don't rasterize anything for it.
+        let (title_tex, body_tex) = if self.dnd {
+            (None, None)
+        } else {
+            let title_tex = self.text_renderer
+                .render(title, 16.0, crate::theme::MitosTheme::TEXT.to_u8())
+                .and_then(TextTexture::from_rgba);
+            let body_tex = self.text_renderer
+                .render(body, 14.0, crate::theme::MitosTheme::effective_text_muted().to_u8())
+                .and_then(TextTexture::from_rgba);
+            (title_tex, body_tex)
+        };
 
         let notif = Notification {
             id: self.next_id,
@@ -103,11 +110,18 @@ impl NotificationManager {
 
     /// Move a notification into bounded history -- whether it got there
     /// by manual dismissal, capacity eviction, or expiring on its own.
-    fn archive(&mut self, n: Notification) {
+    fn archive(&mut self, mut n: Notification) {
         tracing::debug!(
             "MITOS GUI: notification archived: [{}] {} - {}",
             n.app_name, n.title, n.body,
         );
+
+        // History only keeps the text. The rasterized textures were for
+        // showing the toast; holding two of them for each of up to
+        // `MAX_HISTORY` entries is memory spent on pixels nobody will see
+        // (a history view would re-rasterize what it actually displays).
+        n.title_tex = None;
+        n.body_tex = None;
 
         self.history.push(n);
 

@@ -34,6 +34,11 @@ mod screenshot;
 mod dbus;
 mod frosted_glass;
 mod session_ipc;
+mod ipc_line;
+mod power_ipc;
+mod input_ipc;
+mod bluetooth_ipc;
+mod services;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -690,6 +695,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.pending_full_redraw = true;
         }
 
+        if tray.refresh_bluetooth(state.bluetooth_tray_state()) {
+            state.pending_full_redraw = true;
+        }
+
         // Tick notifications (auto-dismiss expired ones)
         if state.notifications.tick() {
             state.pending_full_redraw = true;
@@ -698,6 +707,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Poll D-Bus notifications
         state.poll_dbus();
         state.poll_session_ipc();
+        state.poll_services();
         state.refresh_accessibility_summary();
         if state.auth.active {
             state.dismiss_transient_overlays();

@@ -481,12 +481,15 @@ fn handle_quick_settings_click(
             crate::audio::set_muted(state.muted);
         }
         QsControl::BrightnessSlider => {
-            state.brightness = slider_value_at(rect, x);
-            crate::brightness::set_brightness(state.brightness);
+            // Through mitos-power when it's up, else brightnessctl/light
+            // (see `services.rs`).
+            state.set_brightness(slider_value_at(rect, x));
         }
         QsControl::NightLightToggle => state.toggle_night_light(),
         QsControl::DarkModeToggle => state.toggle_theme_mode(),
         QsControl::DndToggle => state.notifications.dnd = !state.notifications.dnd,
+        QsControl::BluetoothToggle => state.toggle_bluetooth(),
+        QsControl::PowerProfileCycle => state.cycle_power_profile(),
         QsControl::SettingsButton => {
             crate::shell_interaction::launch_app(state, "settings");
             state.quick_settings_visible = false;

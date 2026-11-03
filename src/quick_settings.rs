@@ -3,7 +3,9 @@
 //! A dropdown from the top bar's tray/clock area -- Super+S or a click
 //! there toggles it. Built entirely on state this codebase already
 //! tracks (volume, brightness, night light, dark/light mode, network,
-//! battery); the one new piece of state is Do Not Disturb, which lives
+//! battery, plus Bluetooth and the power profile, which come from
+//! mitos-bluetooth and mitos-power via `services.rs`); the one new piece
+//! of state is Do Not Disturb, which lives
 //! on `NotificationManager::dnd` rather than here (see `notifications
 //! .rs`) since that's the type that actually needs to check it.
 //!
@@ -24,6 +26,10 @@ pub enum QsControl {
     NightLightToggle,
     DarkModeToggle,
     DndToggle,
+    /// mitos-bluetooth: adapter on/off (`services.rs`).
+    BluetoothToggle,
+    /// mitos-power: cycle to the next power profile (`services.rs`).
+    PowerProfileCycle,
     SettingsButton,
 }
 
@@ -33,6 +39,9 @@ const ROW_H: i32 = 40;
 const SLIDER_H: i32 = 14;
 const TOGGLE_H: i32 = 36;
 const GAP: i32 = 10;
+/// One caption line under the Bluetooth/power-profile row (connected
+/// devices and their battery levels).
+const CAPTION_H: i32 = 18;
 
 /// Panel and per-control geometry for the given output size and top
 /// bar height. Shared by the renderer (to draw) and pointer
@@ -52,6 +61,7 @@ pub fn compute_geometry(
     let panel_h = MARGIN + ROW_H /* header */ + ROW_H /* info */
         + ROW_H /* volume */ + ROW_H /* brightness */
         + TOGGLE_H + GAP /* toggles */
+        + TOGGLE_H + CAPTION_H + GAP /* bluetooth + power profile, caption */
         + ROW_H /* settings button */
         + MARGIN;
 
@@ -101,6 +111,18 @@ pub fn compute_geometry(
         controls.push((control, Rectangle::new((x, y).into(), (toggle_w, TOGGLE_H).into())));
     }
     y += TOGGLE_H + GAP;
+
+    // Second row: Bluetooth and the power profile, two wider pills, with a
+    // caption line below (drawn by the renderer, not a control).
+    let half_w = (inner_w - toggle_gap) / 2;
+    for (i, control) in [QsControl::BluetoothToggle, QsControl::PowerProfileCycle]
+        .into_iter()
+        .enumerate()
+    {
+        let x = inner_x + i as i32 * (half_w + toggle_gap);
+        controls.push((control, Rectangle::new((x, y).into(), (half_w, TOGGLE_H).into())));
+    }
+    y += TOGGLE_H + CAPTION_H + GAP;
 
     controls.push((
         QsControl::SettingsButton,

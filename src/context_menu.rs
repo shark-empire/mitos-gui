@@ -1,7 +1,7 @@
 //! Stage 7 (Phase 3): a general-purpose right-click context menu.
 //!
-//! Right now only the desktop background and desktop icons open one,
-//! but the type itself (`ContextMenu` + `MenuAction`) doesn't assume
+//! Right now the desktop background, desktop icons and the Bluetooth
+//! pairing prompt open one, but the type itself (`ContextMenu` + `MenuAction`) doesn't assume
 //! that -- a dock icon or window titlebar context menu later is just
 //! another `MenuAction` variant and another constructor, not a new
 //! menu system.
@@ -22,6 +22,9 @@ pub enum MenuAction {
     OpenTerminalHere,
     OpenDesktopInFiles,
     RefreshDesktopIcons,
+    /// Answer the Bluetooth pairing request waiting on screen (the prompt
+    /// is a context menu -- see `services.rs`).
+    BluetoothPair { accept: bool },
 }
 
 pub struct ContextMenu {
@@ -114,5 +117,6 @@ pub fn execute(state: &mut MitosGuiState, action: MenuAction) {
             state.desktop_icons = crate::desktop_icons::discover_icons();
             state.desktop_icon_selected = None;
         }
+        MenuAction::BluetoothPair { accept } => state.respond_bluetooth_pairing(accept),
     }
 }

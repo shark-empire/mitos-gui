@@ -15,6 +15,9 @@ pub enum NetworkStatus {
 pub struct BatteryStatus {
     pub capacity: u8,
     pub charging: bool,
+    /// Minutes until empty (discharging) or full (charging). Only mitos-power
+    /// reports this (see `services.rs`); the sysfs fallback below leaves it unknown.
+    pub eta_mins: Option<u32>,
 }
 
 /// Detect the best available network connection.
@@ -78,7 +81,7 @@ pub fn poll_battery() -> Option<BatteryStatus> {
 
         let charging = st.trim() == "Charging" || st.trim() == "Full";
 
-        return Some(BatteryStatus { capacity, charging });
+        return Some(BatteryStatus { capacity, charging, eta_mins: None });
     }
 
     None

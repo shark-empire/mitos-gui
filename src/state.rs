@@ -339,6 +339,11 @@ pub struct MitosGuiState {
     /// input event.
     pub last_activity_report: Instant,
 
+    /// Clients for mitos-power, mitos-bluetooth and mitos-input, plus the
+    /// state derived from them (see `services.rs`). Every daemon is
+    /// optional at runtime; each client reconnects on its own.
+    pub services: crate::services::Services,
+
     /// Clipboard/selection + drag-and-drop protocol state (`wl_data_device_manager`).
     pub data_device_state: smithay::wayland::selection::data_device::DataDeviceState,
 
@@ -475,6 +480,7 @@ impl MitosGuiState {
             ),
             session_ipc,
             last_activity_report: Instant::now(),
+            services: crate::services::Services::new(),
             data_device_state,
         }
     }
@@ -561,7 +567,14 @@ impl MitosGuiState {
         self.last_status_poll = Instant::now();
 
         let net = crate::status::poll_network();
-        let bat = crate::status::poll_battery();
+
+        // While mitos-power is connected it pushes battery changes to us
+        // (see `services.rs`), so there's nothing to read from sysfs.
+        let bat = if self.services.power.is_connected() {
+            self.battery
+        } else {
+            crate::status::poll_battery()
+        };
 
         let changed = net != self.network || bat != self.battery;
 
@@ -655,14 +668,23 @@ pub fn remove_output(&mut self, output: &Output) {
     /// single-seat desktop, which is the only case mitos-gui runs
     /// under today). Worth a quick check against
     /// mitos-session's `ipc/messages.rs` before trusting this compiles.
-    pub fn report_activity(&mut self) {
+    ///
+    /// mitos-power's idle clock (dim / blank / sleep) is fed from here too,
+    /// on its own shorter throttle (`report_power_activity`). Returns true
+    /// when this input just woke a *blanked* screen, so the caller can
+    /// swallow it.
+    pub fn report_activity(&mut self) -> bool {
+        let woke_blanked_screen = self.report_power_activity();
+
         if self.last_activity_report.elapsed() < Duration::from_secs(15) {
-            return;
+            return woke_blanked_screen;
         }
         self.last_activity_report = Instant::now();
 
-        let Some(ipc) = self.session_ipc.as_mut() else { return };
+        let Some(ipc) = self.session_ipc.as_mut() else { return woke_blanked_screen };
         ipc.send(&mitos_session::ipc::Request::ReportActivity { seat_id: ipc.session_id.to_string() });
+
+        woke_blanked_screen
     }
 
     /// Drain events/replies from mitos-session and drive the lock

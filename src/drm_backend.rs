@@ -398,9 +398,11 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
 
         if shell_text.refresh(&state.shell) { full_redraw_frames = full_redraw_frames.max(1); }
         if tray.refresh(&state.network, &state.battery, state.volume, state.muted) { state.pending_full_redraw = true; }
+        if tray.refresh_bluetooth(state.bluetooth_tray_state()) { state.pending_full_redraw = true; }
         if state.notifications.tick() { state.pending_full_redraw = true; }
         state.poll_dbus();
         state.poll_session_ipc();
+        state.poll_services();
         // Mirrors main.rs's loop: the AT-SPI tree sync and the
         // lock-screen overlay cleanup (see `MitosGuiState::
         // dismiss_transient_overlays`) both have to run on the real

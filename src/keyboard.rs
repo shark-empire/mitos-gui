@@ -248,19 +248,22 @@ fn dispatch_key(
                         return FilterResult::Intercept(());
                     }
 
+                    // With mitos-power up its own key watcher steps the level
+                    // and the OSD follows its BrightnessChanged; without it
+                    // (or if it stays silent) the shell steps it itself.
+                    // See `MitosGuiState::brightness_key`.
                     keysyms::KEY_XF86MonBrightnessUp => {
-                        state.brightness = state.brightness.saturating_add(5).min(100);
-                        crate::brightness::set_brightness(state.brightness);
-                        state.osd.trigger(crate::state::OsdIcon::Brightness, state.brightness as f32 / 100.0);
-                        state.pending_full_redraw = true;
+                        state.brightness_key(true);
                         return FilterResult::Intercept(());
                     }
 
                     keysyms::KEY_XF86MonBrightnessDown => {
-                        state.brightness = state.brightness.saturating_sub(5);
-                        crate::brightness::set_brightness(state.brightness);
-                        state.osd.trigger(crate::state::OsdIcon::Brightness, state.brightness as f32 / 100.0);
-                        state.pending_full_redraw = true;
+                        state.brightness_key(false);
+                        return FilterResult::Intercept(());
+                    }
+
+                    keysyms::KEY_XF86Sleep => {
+                        state.request_suspend();
                         return FilterResult::Intercept(());
                     }
 
@@ -378,15 +381,17 @@ fn dispatch_key(
                     return FilterResult::Intercept(());
                 }
 
-                // Super + Shift + R: Reboot via mitos-init
+                // Super + Shift + R: Reboot -- through mitos-power when it's
+                // up (honours inhibitors, checks permissions), else via
+                // mitos-init like before.
                 if mods.shift && keysym == keysyms::KEY_r.into() {
-                    crate::session::reboot();
+                    state.request_reboot();
                     return FilterResult::Intercept(());
                 }
 
-                // Super + Shift + P: Power off via mitos-init
+                // Super + Shift + P: Power off -- same routing as above.
                 if mods.shift && keysym == keysyms::KEY_p.into() {
-                    crate::session::poweroff();
+                    state.request_poweroff();
                     return FilterResult::Intercept(());
                 }
 

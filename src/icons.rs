@@ -185,3 +185,61 @@ pub fn battery_icon(
 
     img
 }
+
+/// Bresenham line, two pixels wide so diagonals stay legible at tray size.
+fn line(img: &mut RgbaImage, x0: i32, y0: i32, x1: i32, y1: i32, c: Rgba) {
+    let dx = (x1 - x0).abs();
+    let dy = -(y1 - y0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+    let (mut x, mut y) = (x0, y0);
+
+    loop {
+        put(img, x, y, c);
+        put(img, x + 1, y, c);
+
+        if x == x1 && y == y1 {
+            break;
+        }
+
+        let e2 = 2 * err;
+
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+    }
+}
+
+/// The Bluetooth rune on an 18x18 grid; with a dot either side when a
+/// device is connected.
+pub fn bluetooth_icon(connected: bool, color: Rgba) -> RgbaImage {
+    let mut img = RgbaImage::new(18, 18);
+
+    // One polyline: left-upper tip, right-lower tip, bottom of the spine,
+    // top of the spine, right-upper tip, left-lower tip.
+    let pts = [(4, 5), (13, 12), (9, 16), (9, 2), (13, 6), (4, 12)];
+
+    for pair in pts.windows(2) {
+        let (x0, y0) = pair[0];
+        let (x1, y1) = pair[1];
+        line(&mut img, x0, y0, x1, y1, color);
+    }
+
+    if connected {
+        for (x, y) in [
+            (1, 8), (2, 8), (1, 9), (2, 9),
+            (15, 8), (16, 8), (15, 9), (16, 9),
+        ] {
+            put(&mut img, x, y, color);
+        }
+    }
+
+    img
+}

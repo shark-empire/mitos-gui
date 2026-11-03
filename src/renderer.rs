@@ -1430,6 +1430,10 @@ pub struct TrayState {
 
     bat_key: (u8, u8, bool),
     bat_tex: Option<crate::text::TextTexture>,
+
+    /// 0 = hidden, 1 = Bluetooth on, 2 = a device is connected.
+    bt_key: u8,
+    bt_tex: Option<crate::text::TextTexture>,
 }
 
 impl TrayState {
@@ -1441,7 +1445,28 @@ impl TrayState {
             vol_tex: None,
             bat_key: (255, 0, false),
             bat_tex: None,
+            bt_key: 255,
+            bt_tex: None,
         }
+    }
+
+    /// Re-rasterizes the Bluetooth icon when its state changes. `state` is
+    /// `MitosGuiState::bluetooth_tray_state()`: 0 = hidden, 1 = on, 2 = a
+    /// device is connected. Returns true if the icon changed.
+    pub fn refresh_bluetooth(&mut self, state: u8) -> bool {
+        if state == self.bt_key {
+            return false;
+        }
+
+        self.bt_key = state;
+        self.bt_tex = match state {
+            0 => None,
+            s => crate::text::TextTexture::from_rgba(
+                crate::icons::bluetooth_icon(s == 2, TRAY_COLOR),
+            ),
+        };
+
+        true
     }
 
     pub fn refresh(
@@ -1509,7 +1534,7 @@ impl TrayState {
         let mut w = 0;
         let mut n = 0;
 
-        for t in [&self.net_tex, &self.vol_tex, &self.bat_tex]
+        for t in [&self.bt_tex, &self.net_tex, &self.vol_tex, &self.bat_tex]
             .into_iter()
             .flatten()
         {
@@ -1640,7 +1665,7 @@ pub fn collect_shell_elements(
 
         let cy = panel.position.1 + panel.size.1 / 2;
 
-        for tex in [&tray.net_tex, &tray.vol_tex, &tray.bat_tex]
+        for tex in [&tray.bt_tex, &tray.net_tex, &tray.vol_tex, &tray.bat_tex]
             .into_iter()
             .flatten()
         {
@@ -2406,6 +2431,28 @@ pub fn collect_night_light_elements(
     elements
 }
 
+/// Idle dim/blank (mitos-power's `IdleStateChanged`, see `services.rs`): a
+/// black layer over the whole output. `alpha` 0.0 draws nothing; 1.0 is a
+/// fully blanked screen. Built the same way as the night-light tint above.
+fn collect_dim_overlay_elements(
+    renderer: &mut GlesRenderer,
+    alpha: f32,
+    output_size: Size<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<ChromeRenderElement> {
+    let mut elements = Vec::new();
+
+    if alpha <= 0.0 {
+        return elements;
+    }
+
+    let black = Color32F::new(0.0, 0.0, 0.0, alpha.min(1.0));
+    let buf = SolidColorBuffer::new(output_size, black);
+    elements.extend(buf.render_elements(renderer, (0, 0).into(), scale, 1.0));
+
+    elements
+}
+
 // ============================================================================
 // MASTER FRAME COMPOSITION
 // ============================================================================
@@ -2575,6 +2622,14 @@ pub struct QuickSettingsTextState {
     label_dnd: Option<crate::text::TextTexture>,
     label_settings: Option<crate::text::TextTexture>,
     label_mute: Option<crate::text::TextTexture>,
+    label_bluetooth: Option<crate::text::TextTexture>,
+
+    /// Connected Bluetooth devices + batteries, under the second toggle row.
+    caption_string: String,
+    caption_tex: Option<crate::text::TextTexture>,
+    /// Power-profile button text ("Power: Balanced").
+    profile_string: String,
+    profile_tex: Option<crate::text::TextTexture>,
 
     info_string: String,
     info_tex: Option<crate::text::TextTexture>,
@@ -2600,6 +2655,11 @@ impl QuickSettingsTextState {
             label_dnd: render("Do Not Disturb"),
             label_settings: render("Settings"),
             label_mute: render("Mute"),
+            label_bluetooth: render("Bluetooth"),
+            caption_string: String::new(),
+            caption_tex: None,
+            profile_string: String::new(),
+            profile_tex: None,
             info_string: String::new(),
             info_tex: None,
             volume_pct_string: String::new(),
@@ -2621,7 +2681,20 @@ impl QuickSettingsTextState {
             crate::status::NetworkStatus::Wifi(signal) => format!("Wi-Fi {signal}%"),
         };
         let info = match state.battery {
-            Some(b) => format!("{info} - Battery {}%{}", b.capacity, if b.charging { " (charging)" } else { "" }),
+            Some(b) => match b.eta_mins {
+                // mitos-power knows how long is left: say so. "(charging)"
+                // is dropped then ("to full" already says it), to stay
+                // inside the panel's width.
+                Some(m) if m > 0 => {
+                    let when = if b.charging { "to full" } else { "left" };
+                    if m >= 60 {
+                        format!("{info} - Battery {}%, {}h {:02}m {when}", b.capacity, m / 60, m % 60)
+                    } else {
+                        format!("{info} - Battery {}%, {m}m {when}", b.capacity)
+                    }
+                }
+                _ => format!("{info} - Battery {}%{}", b.capacity, if b.charging { " (charging)" } else { "" }),
+            },
             None => info,
         };
         if info != self.info_string {
@@ -2649,6 +2722,28 @@ impl QuickSettingsTextState {
             self.brightness_pct_tex = self
                 .text_renderer
                 .render(&brightness_pct, 12.0, MitosTheme::effective_text_muted().to_u8())
+                .and_then(crate::text::TextTexture::from_rgba);
+            changed = true;
+        }
+
+        // Bluetooth caption under the second toggle row. The client keeps
+        // this string cached, so reading it every frame costs nothing.
+        let caption = state.services.bluetooth.summary();
+        if caption != self.caption_string {
+            self.caption_string = caption.to_string();
+            self.caption_tex = self
+                .text_renderer
+                .render(caption, 11.0, MitosTheme::effective_text_muted().to_u8())
+                .and_then(crate::text::TextTexture::from_rgba);
+            changed = true;
+        }
+
+        let profile = state.services.profile_label();
+        if profile != self.profile_string {
+            self.profile_string = profile.to_string();
+            self.profile_tex = self
+                .text_renderer
+                .render(profile, 13.0, MitosTheme::TEXT.to_u8())
                 .and_then(crate::text::TextTexture::from_rgba);
             changed = true;
         }
@@ -2742,11 +2837,22 @@ pub fn collect_quick_settings_elements(
         draw_slider(&mut elements, renderer, scale, rect, state.brightness);
     }
 
-    // Toggles: Night Light, Dark Mode, Do Not Disturb.
-    let toggles: [(QsControl, bool, &Option<crate::text::TextTexture>); 3] = [
+    // Toggles: Night Light, Dark Mode, Do Not Disturb; then the second row,
+    // Bluetooth and the power-profile button (lit when it isn't "balanced").
+    let toggles: [(QsControl, bool, &Option<crate::text::TextTexture>); 5] = [
         (QsControl::NightLightToggle, state.night_light, &text.label_night_light),
         (QsControl::DarkModeToggle, state.home_screen.theme_mode != "dark", &text.label_dark_mode),
         (QsControl::DndToggle, state.notifications.dnd, &text.label_dnd),
+        (
+            QsControl::BluetoothToggle,
+            state.services.bluetooth.adapter_powered() == Some(true),
+            &text.label_bluetooth,
+        ),
+        (
+            QsControl::PowerProfileCycle,
+            state.services.profile_is_non_default(),
+            &text.profile_tex,
+        ),
     ];
     for (control, active, label) in toggles {
         if let Some(rect) = find(control) {
@@ -2760,6 +2866,13 @@ pub fn collect_quick_settings_elements(
                     elements.push(ChromeRenderElement::Buffer(el));
                 }
             }
+        }
+    }
+
+    // One-line caption under the Bluetooth row: connected devices + batteries.
+    if let (Some(rect), Some(tex)) = (find(QsControl::BluetoothToggle), &text.caption_tex) {
+        if let Ok(el) = tex.element(renderer, (rect.loc.x + 2, rect.loc.y + rect.size.h + 3)) {
+            elements.push(ChromeRenderElement::Buffer(el));
         }
     }
 
@@ -3517,6 +3630,18 @@ pub fn collect_frame_elements(
             scale,
         ));
     }
+
+    // ------------------------------------------------------------
+    // 12. IDLE DIM / BLANK (mitos-power; see `services.rs`)
+    // ------------------------------------------------------------
+    // Pushed last, like every other "on top of everything" layer in this
+    // function, so it also covers the lock screen and the OSD.
+    elements.extend(collect_dim_overlay_elements(
+        renderer,
+        full_state.screen_dim_alpha(),
+        output_size,
+        scale,
+    ));
 
     Ok(elements)
 }
