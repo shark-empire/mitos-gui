@@ -23,6 +23,7 @@ use crate::input_ipc::{DeviceKind, InputClient, InputEvent, SwipeDir};
 use crate::power_ipc::{BatteryReading, IdleTier, PowerClient, PowerEvent};
 use crate::state::{MitosGuiState, OsdIcon, WORKSPACE_COUNT};
 use crate::status::BatteryStatus;
+use crate::wake::WakeSet;
 
 /// Brightness step for the keyboard fallback (when mitos-power isn't there
 /// to handle the key itself).
@@ -74,6 +75,9 @@ pub struct Services {
     pub input: InputClient,
     pub bluetooth: BluetoothClient,
 
+    /// Readiness of every daemon socket, as one pollable fd (see `wake.rs`).
+    wake: Option<WakeSet>,
+
     // ---- mitos-power derived
     /// The daemon's name for the active profile (what `SetProfile` takes).
     profile: Option<String>,
@@ -108,10 +112,28 @@ impl Services {
     pub fn new() -> Self {
         let now = Instant::now();
 
+        let wake = match WakeSet::new() {
+            Ok(set) => Some(set),
+            Err(err) => {
+                tracing::warn!("MITOS GUI: no wake-up set ({err}); the main loop will keep polling");
+                None
+            }
+        };
+
+        let mut power = PowerClient::new();
+        let mut input = InputClient::new();
+        let mut bluetooth = BluetoothClient::new();
+        if let Some(set) = &wake {
+            power.set_wake(set.clone());
+            input.set_wake(set.clone());
+            bluetooth.set_wake(set.clone());
+        }
+
         let mut services = Self {
-            power: PowerClient::new(),
-            input: InputClient::new(),
-            bluetooth: BluetoothClient::new(),
+            power,
+            input,
+            bluetooth,
+            wake,
             profile: None,
             profiles: Vec::new(),
             profile_label: String::new(),
@@ -135,6 +157,20 @@ impl Services {
 
         services.refresh_profile_label();
         services
+    }
+
+    /// An fd that turns readable whenever any watched socket has data, for
+    /// registering with the event loop (`wake::register_sockets`). `None`
+    /// if the wake set couldn't be created -- the loop then keeps polling.
+    pub fn wake_set(&self) -> Option<&WakeSet> {
+        self.wake.as_ref()
+    }
+
+    /// Whether something is waiting on a short deadline, so the loop must
+    /// not sleep its full idle timeout: just a brightness key given to
+    /// mitos-power that's due its fallback after `BRIGHTNESS_KEY_GRACE`.
+    pub fn wants_fast_tick(&self) -> bool {
+        self.pending_brightness_key.is_some()
     }
 
     /// Text of the Quick Settings power-profile button.

@@ -18,7 +18,7 @@
 //! Nothing here knows any protocol -- callers split lines themselves.
 
 use std::io::{self, Read, Write};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
@@ -205,6 +205,12 @@ impl LineConn {
 
     pub fn has_pending_output(&self) -> bool {
         !self.wbuf.is_empty()
+    }
+
+    /// The socket's fd, for registering it with `wake::WakeSet` so the main
+    /// loop wakes when the peer sends something.
+    pub fn raw_fd(&self) -> RawFd {
+        self.stream.as_raw_fd()
     }
 }
 

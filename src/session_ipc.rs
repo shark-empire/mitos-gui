@@ -81,9 +81,12 @@ impl SessionIpc {
                     if tx.send(msg).is_err() {
                         break; // main thread is gone
                     }
+                    // The main loop may be asleep (see `wake.rs`): have it drain `rx`.
+                    crate::wake::wake();
                 }
                 Err(err) => {
                     tracing::warn!("MITOS GUI: lost connection to mitos-session: {err}");
+                    crate::wake::wake();
                     break;
                 }
             }

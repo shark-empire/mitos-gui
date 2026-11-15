@@ -10,6 +10,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::os::fd::{AsFd, AsRawFd};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -163,6 +164,17 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
     println!("MITOS GUI: production DRM backend starting (Multi-Monitor)");
 
     let mut event_loop: EventLoop<MitosGuiState> = EventLoop::try_new()?;
+
+    // The D-Bus and mitos-session reader threads wake the loop through this
+    // once it can sleep (see `wake.rs`); it has to exist before they start.
+    let ping_ready = match crate::wake::install_ping(&event_loop.handle()) {
+        Ok(()) => true,
+        Err(err) => {
+            tracing::warn!("MITOS GUI: no wake-up ping ({err}); the main loop will keep polling");
+            false
+        }
+    };
+
     let (mut session, notify) = LibSeatSession::new()?;
     event_loop.handle().insert_source(notify, |_event, _, _| {})?;
     println!("MITOS GUI: libseat session active");
@@ -337,6 +349,31 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
         data_device_state,
     );
 
+    // Idle, the loop used to wake every 16 ms just to poll. With every
+    // source of work registered as a wake-up (Wayland clients, new
+    // connections, the reader threads, the daemon sockets), it can sleep
+    // much longer; if any of that fails to register it keeps the old tick.
+    let idle_timeout = {
+        let registered = match state.services.wake_set() {
+            Some(set) => crate::wake::register_sockets(
+                &event_loop.handle(),
+                set,
+                display.as_fd().as_raw_fd(),
+                listening_socket.as_raw_fd(),
+            ),
+            None => Err("no wake-up set".to_string()),
+        };
+
+        match (ping_ready, registered) {
+            (true, Ok(())) => crate::wake::IDLE_TIMEOUT,
+            (_, Err(err)) => {
+                tracing::warn!("MITOS GUI: wake-ups not registered ({err}); idle loop keeps its 16 ms tick");
+                Duration::from_millis(16)
+            }
+            (false, Ok(())) => Duration::from_millis(16),
+        }
+    };
+
     let wallpaper = crate::renderer::Wallpaper::load_default().map_err(|e| format!("MITOS GUI: {e}"))?;
     let mut shell_text = crate::renderer::ShellTextState::new();
     let mut window_chrome = crate::renderer::WindowChrome::new();
@@ -384,7 +421,13 @@ pub fn run_drm() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let needs_render = state.drm_vblank || state.pending_full_redraw || full_redraw_frames > 0;
-        let timeout = if needs_render { Duration::from_millis(1) } else { Duration::from_millis(16) };
+        let timeout = if needs_render {
+            Duration::from_millis(1)
+        } else if state.services.wants_fast_tick() {
+            Duration::from_millis(16)
+        } else {
+            idle_timeout
+        };
         event_loop.dispatch(Some(timeout), &mut state)?;
 
         if let Some(stream) = listening_socket.accept()? {

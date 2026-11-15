@@ -25,7 +25,9 @@ optional: each client connects lazily, retries with backoff (1 s doubling to
 missing. There are no extra threads or channels -- the sockets are
 non-blocking and read once per frame from `MitosGuiState::poll_services()`
 (`src/services.rs`, transport in `src/ipc_line.rs`). While mitos-power is
-connected, sysfs battery polling stops.
+connected, sysfs battery polling stops. In the production (DRM) loop the
+same sockets also wake the loop, which is what lets it sleep when idle (see
+"Idle sleep" below).
 
 | Daemon | Socket (env override) | Wire format | Access needed |
 |---|---|---|---|
@@ -73,6 +75,28 @@ Whatever the socket, the server must be root or the same uid as mitos-gui
   delivers those, without an extra hop) and `HOTKEY` (keyboard.rs already
   matches the same shortcuts, so both would fire).
 
+### Idle sleep (production loop)
+The DRM loop used to wake every 16 ms forever, because Wayland client
+requests, new client connections, and the D-Bus / mitos-session reader
+threads' channels were found by polling. They now wake the loop (`src/wake.rs`):
+the reader threads ping a `calloop` ping source after sending, and the Wayland
+display fd, the listening socket and the daemon sockets are watched through one
+`epoll` set that is registered with the loop once. With all of that in place the
+idle timeout is 250 ms (`wake::IDLE_TIMEOUT`) instead of 16 ms, which only
+bounds how late *time-driven* work (clock minute, toast expiry, OSD timeout,
+daemon reconnects) can run; everything event-driven still wakes it at once.
+If any registration fails, the loop logs a warning and keeps the 16 ms tick.
+The winit dev backend still polls the host window system, so it is unchanged.
+
+### Render order
+`collect_frame_elements` and `collect_background_elements` build a frame
+back-to-front (wallpaper first, overlays last) and reverse the list once
+before returning it, because Smithay's `OutputDamageTracker::render_output`
+and `DrmCompositor::render_frame` take elements front-to-back (first =
+topmost). A window's own elements come back from Smithay already
+front-to-back, so they are flipped before being appended, and windows are
+visited bottom to top.
+
 ### Not done yet
 - Touch to pointer emulation (touch events are still ignored by
   `input.rs`; mitos-input's `TOUCH` stream could drive it).
@@ -82,3 +106,7 @@ Whatever the socket, the server must be root or the same uid as mitos-gui
 - mitos-bluetooth's `subscribe` has no event filter, so the daemon serializes
   every HID report for us only for the client to drop it. A filter parameter
   there would remove that work on both sides.
+
+Bluetooth keyboards and mice reach this compositor through mitos-bluetooth ->
+mitos-input's bridge -> a uinput mirror -> libinput; see those two projects'
+notes. Nothing in mitos-gui changes for that path.

@@ -39,6 +39,7 @@ mod power_ipc;
 mod input_ipc;
 mod bluetooth_ipc;
 mod services;
+mod wake;
 
 use std::sync::Arc;
 use std::time::Duration;

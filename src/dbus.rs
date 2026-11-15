@@ -29,6 +29,8 @@ impl NotificationService {
         _expire_timeout: i32,
     ) -> u32 {
         let _ = self.tx.send((app_name, summary, body));
+        // The main loop may be asleep (see `wake.rs`): have it drain `rx`.
+        crate::wake::wake();
         let mut id = self.next_id.lock().unwrap();
         *id += 1;
         *id

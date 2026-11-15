@@ -22,6 +22,7 @@
 //! let in with a deliberately widened socket mode.
 
 use crate::ipc_line::{log_connect_failure, Backoff, LineConn};
+use crate::wake::WakeSet;
 
 const DEFAULT_SOCKET_PATH: &str = "/run/mitos/input.sock";
 
@@ -131,6 +132,8 @@ pub struct InputClient {
     line: String,
     devices: Vec<Device>,
     announced_down: bool,
+    /// Lets the main loop sleep until mitos-input says something.
+    wake: Option<WakeSet>,
 }
 
 impl InputClient {
@@ -145,7 +148,14 @@ impl InputClient {
             line: String::new(),
             devices: Vec::new(),
             announced_down: false,
+            wake: None,
         }
+    }
+
+    /// Have the main loop wake when this daemon's socket has data
+    /// (see `wake.rs`); without it the loop must poll.
+    pub fn set_wake(&mut self, wake: WakeSet) {
+        self.wake = Some(wake);
     }
 
     /// Whether a device of this kind is currently attached.
@@ -213,6 +223,9 @@ impl InputClient {
                     return;
                 }
 
+                if let Some(wake) = &self.wake {
+                    wake.add(conn.raw_fd());
+                }
                 self.conn = Some(conn);
                 self.devices.clear();
                 self.backoff.succeeded();

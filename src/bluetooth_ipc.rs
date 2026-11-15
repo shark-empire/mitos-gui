@@ -19,6 +19,7 @@
 //! neighbours, and nothing here ever starts a scan.
 
 use crate::ipc_line::{log_connect_failure, Backoff, LineConn};
+use crate::wake::WakeSet;
 use serde_json::{json, Value};
 
 /// Tried in order, unless `$MITOS_BLUETOOTH_SOCKET` names one. The daemon's
@@ -129,6 +130,8 @@ pub struct BluetoothClient {
     /// Quick Settings caption, rebuilt only when something it shows changes
     /// (it's read every frame while the panel is open).
     summary: String,
+    /// Lets the main loop sleep until the daemon says something.
+    wake: Option<WakeSet>,
 }
 
 impl BluetoothClient {
@@ -150,9 +153,16 @@ impl BluetoothClient {
             adapter: None,
             devices: Vec::new(),
             summary: String::new(),
+            wake: None,
         };
         client.rebuild_summary();
         client
+    }
+
+    /// Have the main loop wake when this daemon's socket has data
+    /// (see `wake.rs`); without it the loop must poll.
+    pub fn set_wake(&mut self, wake: WakeSet) {
+        self.wake = Some(wake);
     }
 
     pub fn is_connected(&self) -> bool {
@@ -292,6 +302,9 @@ impl BluetoothClient {
             return;
         };
 
+        if let Some(wake) = &self.wake {
+            wake.add(conn.raw_fd());
+        }
         self.conn = Some(conn);
         self.backoff.succeeded();
         self.announced_down = false;

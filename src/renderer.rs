@@ -2468,6 +2468,12 @@ fn collect_dim_overlay_elements(
 /// second time inside `collect_frame_elements` itself for the actual
 /// on-screen frame — cheap to recompute (no GPU work, just element
 /// descriptors) and keeps that function's signature unchanged.
+///
+/// **Returned in front-to-back order** (first element = topmost), as
+/// Smithay's `OutputDamageTracker::render_output` and
+/// `DrmCompositor::render_frame` require. It is *built* back-to-front
+/// (wallpaper, then windows bottom to top, which is the natural reading
+/// order and matches `Space::elements()`), and reversed once at the end.
 pub fn collect_background_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
@@ -2485,7 +2491,9 @@ pub fn collect_background_elements(
     let wallpaper_element = wallpaper.render_element(renderer, output_size)?;
     elements.push(ChromeRenderElement::Buffer(wallpaper_element));
 
-    for window in space.elements().rev() {
+    // `Space::elements()` is back to front, which is the order this list
+    // is built in (see the doc comment above).
+    for window in space.elements() {
         let win_ws = crate::wm::meta(window).workspace.get(output_name).copied().unwrap_or(0);
 
         let diff = win_ws as i32 - current_ws as i32;
@@ -2500,9 +2508,18 @@ pub fn collect_background_elements(
             renderer, window, final_loc.to_i32_round(), scale, window_chrome,
         ));
 
+        // Smithay hands a window's own elements back front-to-back (popups
+        // and subsurfaces first); flip them into this list's back-to-front
+        // order, or the final reversal would put popups *behind* the window.
         let physical_location = final_loc.to_physical(scale).to_i32_round();
-        elements.extend(window.render_elements(renderer, physical_location, scale, 1.0));
+        let mut surface_elements: Vec<ChromeRenderElement> =
+            window.render_elements(renderer, physical_location, scale, 1.0);
+        surface_elements.reverse();
+        elements.extend(surface_elements);
     }
+
+    // Built back-to-front; Smithay wants front-to-back.
+    elements.reverse();
 
     Ok(elements)
 }
@@ -3438,6 +3455,18 @@ impl OverlayTextState {
     }
 }
 
+/// Builds every element of one output's frame.
+///
+/// **Returned in front-to-back order** (first element = topmost), which is
+/// what Smithay's `OutputDamageTracker::render_output` and
+/// `DrmCompositor::render_frame` take: they draw the list in reverse, and
+/// skip anything hidden behind the opaque regions of earlier elements.
+/// This function *builds* the frame in the order it reads -- wallpaper
+/// first, "on top of everything" layers last, each layer pushed after the
+/// ones it covers -- and reverses the whole list once at the end. Two
+/// rules keep that sound: lists Smithay itself returns (a window's
+/// `render_elements`) are front-to-back already and get flipped before
+/// being appended, and windows are visited bottom to top.
 pub fn collect_frame_elements(
     renderer: &mut GlesRenderer,
     space: &Space<Window>,
@@ -3506,7 +3535,9 @@ pub fn collect_frame_elements(
     // ------------------------------------------------------------
     // 3. WAYLAND APPLICATION WINDOWS (Workspace Aware)
     // ------------------------------------------------------------
-    for window in space.elements().rev() {
+    // Bottom to top (`Space::elements()` order), so each window lands
+    // above the ones beneath it once the list is reversed at the end.
+    for window in space.elements() {
         let win_ws = crate::wm::meta(window).workspace.get(output_name).copied().unwrap_or(0);
 
         let diff = win_ws as i32 - current_ws as i32;
@@ -3522,8 +3553,13 @@ pub fn collect_frame_elements(
             renderer, window, final_loc_i32, scale, window_chrome,
         ));
 
+        // Smithay returns a window's elements front-to-back (popups and
+        // subsurfaces first); flip them to this list's back-to-front order.
         let physical_location = final_loc.to_physical(scale).to_i32_round();
-        elements.extend(window.render_elements(renderer, physical_location, scale, 1.0));
+        let mut surface_elements: Vec<ChromeRenderElement> =
+            window.render_elements(renderer, physical_location, scale, 1.0);
+        surface_elements.reverse();
+        elements.extend(surface_elements);
 
         // Liquid Glass window frame — drawn last so its rounded, frosted
         // edge sits on top of the window's own (square-cornered) content
@@ -3642,6 +3678,10 @@ pub fn collect_frame_elements(
         output_size,
         scale,
     ));
+
+    // Everything above was pushed back-to-front; Smithay wants the topmost
+    // element first (see the doc comment on this function).
+    elements.reverse();
 
     Ok(elements)
 }

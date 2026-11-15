@@ -13,6 +13,7 @@
 //! mitos-power's own `session_client` makes for mitos-session.
 
 use crate::ipc_line::{log_connect_failure, Backoff, LineConn};
+use crate::wake::WakeSet;
 use serde_json::{json, Value};
 
 const DEFAULT_SOCKET_PATH: &str = "/run/mitos/power.sock";
@@ -116,6 +117,8 @@ pub struct PowerClient {
     announced_down: bool,
     /// A send failed outside `poll`; report `Disconnected` on the next one.
     lost: bool,
+    /// Lets the main loop sleep until the daemon says something.
+    wake: Option<WakeSet>,
 }
 
 impl PowerClient {
@@ -132,6 +135,19 @@ impl PowerClient {
             line: String::new(),
             announced_down: false,
             lost: false,
+            wake: None,
+        }
+    }
+
+    /// Have the main loop wake when this daemon's socket has data
+    /// (see `wake.rs`); without it the loop must poll.
+    pub fn set_wake(&mut self, wake: WakeSet) {
+        self.wake = Some(wake);
+    }
+
+    fn watch_connection(&self) {
+        if let (Some(wake), Some(conn)) = (&self.wake, &self.conn) {
+            wake.add(conn.raw_fd());
         }
     }
 
@@ -250,6 +266,7 @@ impl PowerClient {
         match LineConn::connect(&self.path) {
             Ok(conn) => {
                 self.conn = Some(conn);
+                self.watch_connection();
                 self.backoff.succeeded();
                 self.announced_down = false;
                 tracing::info!("MITOS GUI: connected to mitos-power at {}", self.path);
