@@ -35,6 +35,7 @@ mod dbus;
 mod frosted_glass;
 mod session_ipc;
 mod ipc_line;
+mod audio_ipc;
 mod power_ipc;
 mod input_ipc;
 mod bluetooth_ipc;

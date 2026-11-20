@@ -17,7 +17,7 @@ These features map directly to the 9 points in your  INTEGRATION.md  file:
 	3.	D-Bus Notifications (Point 4): If an external application tries to set the system volume via PulseAudio/PipeWire,  mitos-network  or your audio service can emit a signal that  mitos-gui  catches, allowing it to show the OSD pill even if the volume was changed via an external tool.
 
 
-## 10. Daemon integrations (mitos-power, mitos-bluetooth, mitos-input)
+## 10. Daemon integrations (mitos-power, mitos-bluetooth, mitos-input, mitos-audio)
 
 mitos-gui talks to three daemons over their own Unix sockets. All three are
 optional: each client connects lazily, retries with backoff (1 s doubling to
@@ -34,6 +34,7 @@ same sockets also wake the loop, which is what lets it sleep when idle (see
 | mitos-power | `/run/mitos/power.sock` (`MITOS_POWER_SOCKET`) | JSON lines | socket is `0660 root:power`: run mitos-gui as a member of `power`; suspend/reboot/poweroff need that group (or root) too |
 | mitos-bluetooth | `/run/mitos/bluetooth.sock`, then `/tmp/mitos-bluetooth.sock` (`MITOS_BLUETOOTH_SOCKET`) | JSON lines | `power_on`/`power_off`/pairing need the daemon's own uid |
 | mitos-input | `/run/mitos/input.sock` (`MITOS_INPUT_SOCKET`) | text lines | socket is `0600`: same user as mitos-input |
+| mitos-audio | `/run/mitos/audio.sock` (`MITOS_AUDIO_SOCKET`) | JSON lines | socket is `0660`: run mitos-gui as root, the daemon's uid, or a member of the `mitos-audio` group |
 
 Whatever the socket, the server must be root or the same uid as mitos-gui
 (checked with `SO_PEERCRED`); anything else is refused.
@@ -74,6 +75,29 @@ Whatever the socket, the server must be root or the same uid as mitos-gui
 - Deliberately *not* used: the `KEY`/`POINTER` relay (libinput already
   delivers those, without an extra hop) and `HOTKEY` (keyboard.rs already
   matches the same shortcuts, so both would fire).
+
+**mitos-audio**
+- The real master volume and mute state are read at connect and pushed after
+  that: tray icon, Quick Settings slider/mute, and the OSD all follow, including
+  changes made by anything else (`mitos-audioctl`, a settings app). Before this
+  the shell kept its own number (starting at 70) and never read the system's.
+- Volume keys, the mute key and the Quick Settings slider/mute send one small
+  message to the daemon instead of spawning `wpctl`/`pactl` for every step.
+  Without the daemon they fall back to those tools exactly as before
+  (`audio.rs`).
+- Quick Settings output button: shows the default output and switches to the
+  next present output device on click (unplugged devices and inputs are
+  skipped). A toast confirms switches, including automatic ones from routing
+  rules.
+- `XF86AudioMicMute` toggles the microphone; the toast follows the daemon's
+  `MicrophoneChanged`, so it reflects mutes done elsewhere too.
+- Used from the daemon's protocol: `SubscribeEvents` + `GetState` on one
+  connection, `SetVolume`, `Mute`/`Unmute`, `GetVolume`, `ListDevices`,
+  `SetDefaultOutput`, `MuteMicrophone`. Not used: per-application streams (a
+  mixer UI) and `SubscribeLevels` (metering); the shell has no widget for them.
+- This is a thin client, not `libmitos-audio`: that crate is built on tokio,
+  which a compositor shouldn't link and run a runtime for just to move a
+  slider.
 
 ### Idle sleep (production loop)
 The DRM loop used to wake every 16 ms forever, because Wayland client

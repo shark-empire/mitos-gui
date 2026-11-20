@@ -30,6 +30,8 @@ pub enum QsControl {
     BluetoothToggle,
     /// mitos-power: cycle to the next power profile (`services.rs`).
     PowerProfileCycle,
+    /// mitos-audio: switch to the next audio output (`services.rs`).
+    AudioOutputCycle,
     SettingsButton,
 }
 
@@ -62,6 +64,7 @@ pub fn compute_geometry(
         + ROW_H /* volume */ + ROW_H /* brightness */
         + TOGGLE_H + GAP /* toggles */
         + TOGGLE_H + CAPTION_H + GAP /* bluetooth + power profile, caption */
+        + TOGGLE_H + GAP /* audio output */
         + ROW_H /* settings button */
         + MARGIN;
 
@@ -123,6 +126,14 @@ pub fn compute_geometry(
         controls.push((control, Rectangle::new((x, y).into(), (half_w, TOGGLE_H).into())));
     }
     y += TOGGLE_H + CAPTION_H + GAP;
+
+    // Third row: the audio output -- one full-width button that shows the
+    // current default output and switches to the next one when clicked.
+    controls.push((
+        QsControl::AudioOutputCycle,
+        Rectangle::new((inner_x, y).into(), (inner_w, TOGGLE_H).into()),
+    ));
+    y += TOGGLE_H + GAP;
 
     controls.push((
         QsControl::SettingsButton,

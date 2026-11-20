@@ -2647,6 +2647,9 @@ pub struct QuickSettingsTextState {
     /// Power-profile button text ("Power: Balanced").
     profile_string: String,
     profile_tex: Option<crate::text::TextTexture>,
+    /// Audio output button text ("Output: Speakers").
+    output_string: String,
+    output_tex: Option<crate::text::TextTexture>,
 
     info_string: String,
     info_tex: Option<crate::text::TextTexture>,
@@ -2677,6 +2680,8 @@ impl QuickSettingsTextState {
             caption_tex: None,
             profile_string: String::new(),
             profile_tex: None,
+            output_string: String::new(),
+            output_tex: None,
             info_string: String::new(),
             info_tex: None,
             volume_pct_string: String::new(),
@@ -2761,6 +2766,16 @@ impl QuickSettingsTextState {
             self.profile_tex = self
                 .text_renderer
                 .render(profile, 13.0, MitosTheme::TEXT.to_u8())
+                .and_then(crate::text::TextTexture::from_rgba);
+            changed = true;
+        }
+
+        let output = state.services.audio.output_label();
+        if output != self.output_string {
+            self.output_string = output.to_string();
+            self.output_tex = self
+                .text_renderer
+                .render(output, 13.0, MitosTheme::TEXT.to_u8())
                 .and_then(crate::text::TextTexture::from_rgba);
             changed = true;
         }
@@ -2856,7 +2871,7 @@ pub fn collect_quick_settings_elements(
 
     // Toggles: Night Light, Dark Mode, Do Not Disturb; then the second row,
     // Bluetooth and the power-profile button (lit when it isn't "balanced").
-    let toggles: [(QsControl, bool, &Option<crate::text::TextTexture>); 5] = [
+    let toggles: [(QsControl, bool, &Option<crate::text::TextTexture>); 6] = [
         (QsControl::NightLightToggle, state.night_light, &text.label_night_light),
         (QsControl::DarkModeToggle, state.home_screen.theme_mode != "dark", &text.label_dark_mode),
         (QsControl::DndToggle, state.notifications.dnd, &text.label_dnd),
@@ -2870,6 +2885,8 @@ pub fn collect_quick_settings_elements(
             state.services.profile_is_non_default(),
             &text.profile_tex,
         ),
+        // The audio output: never "lit" -- it's a switcher, not an on/off.
+        (QsControl::AudioOutputCycle, false, &text.output_tex),
     ];
     for (control, active, label) in toggles {
         if let Some(rect) = find(control) {

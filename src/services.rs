@@ -5,6 +5,7 @@
 //! | mitos-power      | `power_ipc`       | battery/AC in the tray, brightness, profiles, idle dim/blank, sleep/shutdown, inhibitors |
 //! | mitos-bluetooth  | `bluetooth_ipc`   | tray icon, Quick Settings toggle + device batteries, toasts, pairing prompt |
 //! | mitos-input      | `input_ipc`       | device hot-plug toasts, on-screen keyboard policy, touchscreen gestures |
+//! | mitos-audio      | `audio_ipc`       | real volume/mute (keys, slider, tray, OSD), output switcher, microphone mute key |
 //!
 //! The clients only speak wire protocols and yield events; everything that
 //! touches shell state lives here. Every daemon is optional: with one
@@ -17,6 +18,7 @@
 
 use std::time::{Duration, Instant};
 
+use crate::audio_ipc::{AudioClient, AudioEvent};
 use crate::bluetooth_ipc::{BluetoothClient, BtEvent, PairMethod};
 use crate::context_menu::{ContextMenu, MenuAction};
 use crate::input_ipc::{DeviceKind, InputClient, InputEvent, SwipeDir};
@@ -37,6 +39,12 @@ const BRIGHTNESS_KEY_GRACE: Duration = Duration::from_millis(400);
 /// A `BrightnessChanged` this soon after the shell set brightness itself is
 /// the echo of that change, not news.
 const OWN_BRIGHTNESS_ECHO: Duration = Duration::from_millis(400);
+
+/// Same for volume/mute: a `VolumeChanged` this soon after the shell set the
+/// volume itself is the echo of that change (the key or slider already
+/// showed it), not news -- and is ignored, so a slider drag can't be pulled
+/// back to an older step by an earlier echo arriving late.
+const OWN_VOLUME_ECHO: Duration = Duration::from_millis(400);
 
 /// How often input is forwarded to mitos-power's idle clock while the screen
 /// is awake (it is forwarded at once when waking from dim/blank).
@@ -74,6 +82,7 @@ pub struct Services {
     pub power: PowerClient,
     pub input: InputClient,
     pub bluetooth: BluetoothClient,
+    pub audio: AudioClient,
 
     /// Readiness of every daemon socket, as one pollable fd (see `wake.rs`).
     wake: Option<WakeSet>,
@@ -106,6 +115,9 @@ pub struct Services {
     pending_pair: Option<String>,
     /// Devices already warned about a low battery (re-armed on recovery).
     low_battery_warned: Vec<String>,
+
+    // ---- mitos-audio derived
+    last_own_volume_set: Instant,
 }
 
 impl Services {
@@ -123,16 +135,19 @@ impl Services {
         let mut power = PowerClient::new();
         let mut input = InputClient::new();
         let mut bluetooth = BluetoothClient::new();
+        let mut audio = AudioClient::new();
         if let Some(set) = &wake {
             power.set_wake(set.clone());
             input.set_wake(set.clone());
             bluetooth.set_wake(set.clone());
+            audio.set_wake(set.clone());
         }
 
         let mut services = Self {
             power,
             input,
             bluetooth,
+            audio,
             wake,
             profile: None,
             profiles: Vec::new(),
@@ -153,6 +168,7 @@ impl Services {
             input_listed: false,
             pending_pair: None,
             low_battery_warned: Vec::new(),
+            last_own_volume_set: now,
         };
 
         services.refresh_profile_label();
@@ -220,6 +236,11 @@ impl MitosGuiState {
         let bluetooth_events = self.services.bluetooth.poll();
         for event in bluetooth_events {
             self.apply_bluetooth_event(event);
+        }
+
+        let audio_events = self.services.audio.poll();
+        for event in audio_events {
+            self.apply_audio_event(event);
         }
 
         self.tick_services();
@@ -395,6 +416,162 @@ impl MitosGuiState {
         if let Some(address) = self.services.pending_pair.take() {
             self.services.bluetooth.pairing_confirm(&address, accept);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // mitos-audio
+    // ------------------------------------------------------------------
+
+    /// Master volume, 0-100 (and unmutes, like turning a real knob up).
+    /// Through mitos-audio when it's up -- one small message instead of a
+    /// `wpctl`/`pactl` process per step -- else the old CLI fallback.
+    pub fn set_volume(&mut self, percent: u8) {
+        let percent = percent.min(100);
+        let was_muted = self.muted;
+
+        self.volume = percent;
+        self.muted = false;
+        self.services.last_own_volume_set = Instant::now();
+
+        if self.services.audio.set_volume(percent) {
+            if was_muted {
+                self.services.audio.set_muted(false);
+            }
+        } else {
+            crate::audio::set_muted(false);
+            crate::audio::set_volume(percent);
+        }
+    }
+
+    pub fn toggle_mute(&mut self) {
+        let muted = !self.muted;
+
+        self.muted = muted;
+        self.services.last_own_volume_set = Instant::now();
+
+        if !self.services.audio.set_muted(muted) {
+            crate::audio::set_muted(muted);
+        }
+    }
+
+    /// A volume key: one step, with the OSD.
+    pub fn volume_key(&mut self, up: bool) {
+        let target = if up {
+            self.volume.saturating_add(5).min(100)
+        } else {
+            self.volume.saturating_sub(5)
+        };
+
+        self.set_volume(target);
+        self.osd.trigger(OsdIcon::Volume, target as f32 / 100.0);
+        self.pending_full_redraw = true;
+    }
+
+    /// The mute key: toggle, with the OSD.
+    pub fn mute_key(&mut self) {
+        self.toggle_mute();
+
+        let icon = if self.muted { OsdIcon::Muted } else { OsdIcon::Volume };
+        let level = if self.muted { 0.0 } else { self.volume as f32 / 100.0 };
+        self.osd.trigger(icon, level);
+        self.pending_full_redraw = true;
+    }
+
+    /// The microphone mute key. The toast comes from the daemon's
+    /// `MicrophoneChanged`, so it also reflects changes made elsewhere.
+    pub fn toggle_mic_mute(&mut self) {
+        let sent = match self.services.audio.mic_muted() {
+            Some(muted) => self.services.audio.set_mic_muted(!muted),
+            None => false,
+        };
+
+        if !sent {
+            self.notifications.push(
+                "Audio",
+                "Can't change the microphone",
+                "mitos-audio isn't running.",
+            );
+        }
+    }
+
+    /// Quick Settings: switch to the next audio output.
+    pub fn cycle_audio_output(&mut self) {
+        // The "Output changed" toast follows from the daemon's
+        // `DefaultOutputChanged`.
+        if self.services.audio.cycle_output().is_some() {
+            return;
+        }
+
+        let body = if self.services.audio.is_connected() {
+            "There's no other audio output to switch to."
+        } else {
+            "mitos-audio isn't running."
+        };
+        self.notifications.push("Audio", "Can't switch output", body);
+    }
+
+    fn apply_audio_event(&mut self, event: AudioEvent) {
+        match event {
+            AudioEvent::Connected => {}
+            AudioEvent::Disconnected => {
+                self.pending_full_redraw = true;
+            }
+            // The real state, straight from the daemon: first sync, or a
+            // new default output (each has its own volume). Not a change
+            // the user made, so no OSD.
+            AudioEvent::Master { volume, muted } => {
+                self.volume = volume;
+                self.muted = muted;
+                self.pending_full_redraw = true;
+            }
+            // The daemon echoes every change, ours included. Within a moment
+            // of one of ours that's just the echo: the keys or slider already
+            // show it, and applying it could flick a slider mid-drag back to
+            // an older step.
+            AudioEvent::Volume(volume) => {
+                if self.services.last_own_volume_set.elapsed() < OWN_VOLUME_ECHO {
+                    return;
+                }
+                self.volume = volume;
+                self.show_external_volume_osd();
+                self.pending_full_redraw = true;
+            }
+            AudioEvent::Muted(muted) => {
+                if self.services.last_own_volume_set.elapsed() < OWN_VOLUME_ECHO {
+                    return;
+                }
+                self.muted = muted;
+                self.show_external_volume_osd();
+                self.pending_full_redraw = true;
+            }
+            AudioEvent::OutputChanged { name } => {
+                let body = format!("Now playing on {name}.");
+                self.notifications.push("Audio", "Output changed", &body);
+            }
+            AudioEvent::MicMuted(muted) => {
+                let (title, body) = if muted {
+                    ("Microphone muted", "Apps can't hear you.")
+                } else {
+                    ("Microphone on", "Apps can hear you again.")
+                };
+                self.notifications.push("Audio", title, body);
+            }
+            AudioEvent::ActionFailed { what, message } => {
+                self.toast_failure("Audio", what, &message);
+            }
+        }
+    }
+
+    /// The volume or mute changed from outside the shell (`mitos-audioctl`,
+    /// a settings app, another client): show it.
+    fn show_external_volume_osd(&mut self) {
+        if self.services.idle_tier != IdleTier::Awake {
+            return;
+        }
+
+        let icon = if self.muted { OsdIcon::Muted } else { OsdIcon::Volume };
+        let level = if self.muted { 0.0 } else { self.volume as f32 / 100.0 };
+        self.osd.trigger(icon, level);
     }
 
     // ------------------------------------------------------------------

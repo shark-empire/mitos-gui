@@ -219,32 +219,25 @@ fn dispatch_key(
             // --------------------------------------------------------
             if key_state == KeyState::Pressed {
                 match keysym.raw() {
+                    // Volume keys act on mitos-audio when it's up (see
+                    // `services.rs`), else on wpctl/pactl as before.
                     keysyms::KEY_XF86AudioRaiseVolume => {
-                        state.muted = false;
-                        state.volume = state.volume.saturating_add(5).min(100);
-                        crate::audio::set_muted(false);
-                        crate::audio::set_volume(state.volume);
-                        state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
-                        state.pending_full_redraw = true;
+                        state.volume_key(true);
                         return FilterResult::Intercept(());
                     }
 
                     keysyms::KEY_XF86AudioLowerVolume => {
-                        state.muted = false;
-                        state.volume = state.volume.saturating_sub(5);
-                        crate::audio::set_muted(false);
-                        crate::audio::set_volume(state.volume);
-                        state.osd.trigger(crate::state::OsdIcon::Volume, state.volume as f32 / 100.0);
-                        state.pending_full_redraw = true;
+                        state.volume_key(false);
                         return FilterResult::Intercept(());
                     }
 
                     keysyms::KEY_XF86AudioMute => {
-                        state.muted = !state.muted;
-                        crate::audio::set_muted(state.muted);
-                        let icon = if state.muted { crate::state::OsdIcon::Muted } else { crate::state::OsdIcon::Volume };
-                        state.osd.trigger(icon, if state.muted { 0.0 } else { state.volume as f32 / 100.0 });
-                        state.pending_full_redraw = true;
+                        state.mute_key();
+                        return FilterResult::Intercept(());
+                    }
+
+                    keysyms::KEY_XF86AudioMicMute => {
+                        state.toggle_mic_mute();
                         return FilterResult::Intercept(());
                     }
 

@@ -1,3 +1,8 @@
+//! **Fallback only.** When mitos-audio is running, the volume keys and
+//! Quick Settings talk to it directly (`audio_ipc.rs`, `services.rs`), which
+//! is one small message per step instead of a process per step. This module
+//! is what still runs when that daemon isn't there:
+//!
 //! Best-effort system volume control via whatever audio CLI is already
 //! on `$PATH` -- `wpctl` (PipeWire/WirePlumber, the modern default on
 //! most current distros) first, falling back to `pactl` (PulseAudio, or

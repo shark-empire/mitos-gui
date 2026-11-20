@@ -471,15 +471,12 @@ fn handle_quick_settings_click(
 
     match control {
         QsControl::VolumeSlider => {
-            state.volume = slider_value_at(rect, x);
-            state.muted = false;
-            crate::audio::set_volume(state.volume);
-            crate::audio::set_muted(false);
+            // Through mitos-audio when it's up, else wpctl/pactl (see
+            // `services.rs`).
+            state.set_volume(slider_value_at(rect, x));
         }
-        QsControl::MuteToggle => {
-            state.muted = !state.muted;
-            crate::audio::set_muted(state.muted);
-        }
+        QsControl::MuteToggle => state.toggle_mute(),
+        QsControl::AudioOutputCycle => state.cycle_audio_output(),
         QsControl::BrightnessSlider => {
             // Through mitos-power when it's up, else brightnessctl/light
             // (see `services.rs`).
